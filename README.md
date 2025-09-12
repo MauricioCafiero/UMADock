@@ -9,6 +9,9 @@ Docking molecules in protein binding sites using Meta's UMA MLIP as the energy s
 -  See notebooks folder for Colab examples
 -  Needs HuggingFace token and access to the Meta repo.
 
+### Run from an Agent
+See the sample notebook for calling UMADock from an AI agent. 
+
 ## Set-up  
 (UMADock has it's own dependncies, including RDKit and py3Dmol; see notebooks for examples)
 
@@ -71,4 +74,9 @@ def dock_total(smiles: str, target: str):
 
 ## Sample Output
 ![UMADock 2JPG](https://github.com/user-attachments/assets/2fc5e47e-ab8a-4fa3-b67c-a31ee0a175d1)
+
+## To-do list
+- Convert all lists/arrays to Numpy or Torch and either compile to C or use GPU
+- use as a direct tool for the Langraph agent rather than calling a Gradio client
+- Look at defaults for pose selection criteria
 
