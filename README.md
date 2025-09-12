@@ -77,6 +77,21 @@ def dock_total(smiles: str, target: str):
 ## Sample Output
 ![UMADock 2JPG](https://github.com/user-attachments/assets/2fc5e47e-ab8a-4fa3-b67c-a31ee0a175d1)
 
+## Agent output
+```
+query_smiles:  O=C(O)[C@@](NN)(Cc1cc(O)c(O)cc1)C
+query_protein: DRD2
+The docking calculation results indicate that the molecule represented by the SMILES string O=C(O)[C
+@@](NN)(Cc1cc(O)c(O)cc1)C was docked into the DRD2 protein. The specific conformer and pose that res
+ulted in the lowest electronic binding energy were identified as conformer 8 and pose 0, respectivel
+y. The binding energy for this pose was calculated to be -12.034 kcal/mol. This negative value sugge
+sts a favorable interaction between the molecule and the DRD2 protein, indicating that the molecule 
+may be a potential ligand or inhibitor that could bind effectively to the DRD2 protein. The docking 
+results provide valuable insights into the potential binding affinity and interaction of the molecul
+e with the target protein, which can be further investigated for drug discovery and development purp
+oses.
+```
+
 ## To-do list
 - Convert all lists/arrays to Numpy or Torch and either compile to C or use GPU
 - use as a direct tool for the Langraph agent rather than calling a Gradio client
