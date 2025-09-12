@@ -11,6 +11,8 @@ Docking molecules in protein binding sites using Meta's UMA MLIP as the energy s
 
 ### Run from an Agent
 See the sample notebook for calling UMADock from an AI agent. 
+- Langgraph agent
+- Huggingface models (Phi4-mini-instruct)
 
 ## Set-up  
 (UMADock has it's own dependncies, including RDKit and py3Dmol; see notebooks for examples)
