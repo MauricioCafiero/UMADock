@@ -1138,7 +1138,7 @@ class UMA_Dock():
       # Run dynamics
     dyn.run(steps)
 
-    df = pd.read_table(log_file, sep="\s
+    df = pd.read_table(log_file, sep="\s+")
     df["Etot/N[eV]"] = pd.to_numeric(df["Etot/N[eV]"], errors='coerce')
     x = df["Etot/N[eV]"].to_list()
     scale_start = sum(x)/len(x)
