@@ -1114,7 +1114,11 @@ class UMA_Dock():
     """
       # Read last frame from XYZ (use index=0 for the first frame, ":" for all frames)
     atoms = ase.io.read(self.best_filename, format = 'xyz')
+    total_spin = self.bs_object['spin'] + self.frags[self.best_conf_idx]['spin'] - 1
+    total_charge = self.bs_object['charge'] + self.frags[self.best_conf_idx]['charge']
+    atoms.info.update({"spin": total_spin, "charge": total_charge})
     atoms.calc = self.calculator
+    
 
       # Initialize velocities consistent with the target temperature
     MaxwellBoltzmannDistribution(atoms, temperature_K * units.kB)
@@ -1163,6 +1167,16 @@ def show_frame(xyz_file: str, frame_number = 1):
   frame_start = frame_number * (num_atoms + 2)  # Start of the desired frame
   frame_lines = lines[frame_start : frame_start + num_atoms + 2]  # Extract frame
   visualize_molecule("".join(frame_lines))
+
+def visualize_molecule(xyz_string: str):
+  '''
+    input an XYZ string to vosualize the molecule in 3D
+  '''
+  viewer = py3Dmol.view(width=800, height=400)
+  viewer.addModel(xyz_string, "xyz")  
+  viewer.setStyle({"stick": {}, "sphere": {"radius": 0.5}})
+  viewer.zoomTo()
+  viewer.show()
 
 def view_from_file(filename: str, bs_object, frag):
       '''
