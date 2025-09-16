@@ -1060,7 +1060,96 @@ class UMA_Dock():
         elec_bind_es.append(-1)
         print(f"No poses for {frag['name']}")
 
-    return opt_ies, elec_bind_es
+    self.opt_ies = opt_ies
+    self.elec_bind_es = elec_bind_es
+    
+    return self.opt_ies, self.elec_bind_es
+  
+  def show_best(self):
+    '''
+    Get best pose overall and display
+    '''
+    i = 0
+    out_text = ""
+    for pre_opt, post_opt in zip(self.opt_ies, self.elec_bind_es):
+      out_text += f"Conformer {i} ===============================================================================\n"
+      if pre_opt!= -1.0:
+        out_text += f"Optimized Docking energy: {pre_opt:10.3f}, Binding energy with desolvation and strain: {post_opt:10.3f}\n"
+      else:
+        out_text += "No good poses\n"
+      i += 1
+
+    print(out_text)
+    
+    self.best_conf_idx = np.argmin(self.elec_bind_es)
+    self.best_energy = self.elec_bind_es[best_conf_idx]
+
+    self.best_pose_idx = np.argmin(self.distances[self.best_conf_idx])
+
+    print(f"The lowest elecronic binding energy came from conformer {self.best_conf_idx}, \
+    and pose {self.best_pose_idx} = {self.best_energy:.3f} kcal/mol")
+
+    self.best_filename = f'/content/opt_files/{/{self.bs_object['name']}_w_conf_{self.best_conf_idx}{self.best_pose_idx}_OPTIMIZED.xyz'
+    view_from_file(self.best_filename, self.bs_object, self.frags[best_conf_idx])
+  
+  def run_md_from_xyz(self, temperature_K: float = 300.0, timestep_fs: float = 1.0, steps: int = 1000,
+    output_traj: str = "md.traj", log_file: str = "md.log") -> Atoms:
+    """
+    Read the last frame from an XYZ file and run MD with ASE using VelocityVerlet.
+
+    Returns None
+    """
+      # Read last frame from XYZ (use index=0 for the first frame, ":" for all frames)
+    atoms = read(self.best_filename, format = 'xyz')
+    atoms.calc = self.calculator
+
+      # Initialize velocities consistent with the target temperature
+    MaxwellBoltzmannDistribution(atoms, temperature_K * units.kB)
+    Stationary(atoms)
+    ZeroRotation(atoms)
+
+      # Use VelocityVerlet integrator
+    dyn = VelocityVerlet(atoms, timestep_fs * units.fs)
+
+      # Logging and trajectory writing
+    logger = MDLogger(dyn, atoms, log_file, header=True, stress=False, peratom=True)
+    dyn.attach(logger, interval=10)
+
+    traj = Trajectory(output_traj, "w", atoms)
+    dyn.attach(traj.write, interval=10)
+
+      # Run dynamics
+    dyn.run(steps)
+
+    df = pd.read_table(log_file, sep="\s+")
+    x = df["Etot/N[eV]"].to_list()
+    scale_start = sum(x)/len(x)
+    x = [val - scale_start for val in x]
+
+    y = df["Time[ps]"].to_list()
+
+    plt.plot(y, x)
+    plt.xlabel("Time (fs)")
+    plt.ylabel("Energy (eV)")
+    plt.show()
+
+def show_frame(xyz_file: str, frame_number = 1):
+  '''
+  receives an XYZ file and a frame number and shows the frame in 3D
+
+    Args:
+      xyz_file: XYZ file with one or more molecules
+      frame_number: frame number to show in 3D
+    Returns:
+      None; shows frame in 3D
+  '''
+  with open(xyz_file, "r") as f:
+    lines = f.readlines()
+
+  num_atoms = int(lines[0].strip())  # Number of atoms from the first line
+  frame_start = frame_number * (num_atoms + 2)  # Start of the desired frame
+  frame_lines = lines[frame_start : frame_start + num_atoms + 2]  # Extract frame
+  visualize_molecule("".join(frame_lines))
 
 def view_from_file(filename: str, bs_object, frag):
       '''
