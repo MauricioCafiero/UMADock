@@ -1095,7 +1095,7 @@ class UMA_Dock():
     print(out_text)
     
     self.best_conf_idx = np.argmin(self.elec_bind_es)
-    self.best_energy = self.elec_bind_es[best_conf_idx]
+    self.best_energy = self.elec_bind_es[self.best_conf_idx]
 
     self.best_pose_idx = np.argmin(self.distances[self.best_conf_idx])
 
