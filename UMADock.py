@@ -1103,7 +1103,7 @@ class UMA_Dock():
     and pose {self.best_pose_idx} = {self.best_energy:.3f} kcal/mol")
 
     self.best_filename = f'/content/opt_files/{self.bs_object['name']}_w_conf_{self.best_conf_idx}{self.best_pose_idx}_OPTIMIZED.xyz'
-    view_from_file(self.best_filename, self.bs_object, self.frags[best_conf_idx])
+    view_from_file(self.best_filename, self.bs_object, self.frags[self.best_conf_idx])
   
   def run_md_from_xyz(self, temperature_K: float = 300.0, timestep_fs: float = 1.0, steps: int = 1000,
     output_traj: str = "md.traj", log_file: str = "md.log") -> Atoms:
