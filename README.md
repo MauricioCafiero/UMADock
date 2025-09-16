@@ -5,7 +5,7 @@ Docking molecules in protein binding sites using Meta's UMA MLIP as the energy s
 -  Evaluates pose energy with UMA
 -  Optimizes best pose from each conformer
 -  Calculates an explcit desolvation energy and a ligand strain energy; combines these with the interaction energy for an electronic binding energy.
--  Chooses best overall
+-  Chooses best overall, and performs rudimentary dynamics to examine stability.
 -  See notebooks folder for Colab examples
 -  Needs HuggingFace token and access to the Meta repo.
 
