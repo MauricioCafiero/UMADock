@@ -11,7 +11,20 @@ from google.colab import files
 from ase.calculators.calculator import all_changes
 from ase.optimize import BFGS
 from ase.constraints import FixAtoms
-from ase import Atoms, Atom
+from ase import Atoms, Atom, units
+
+from typing import Optional
+from ase.io.trajectory import Trajectory
+from ase.calculators.emt import EMT
+from ase.md.verlet import VelocityVerlet
+from ase.md.velocitydistribution import (
+    MaxwellBoltzmannDistribution,
+    Stationary,
+    ZeroRotation,
+)
+from ase.md import MDLogger
+import pandas as pd
+import matplotlib.pyplot as plt
 import numpy as np
 from fairchem.core import FAIRChemCalculator, pretrained_mlip
 
@@ -1089,7 +1102,7 @@ class UMA_Dock():
     print(f"The lowest elecronic binding energy came from conformer {self.best_conf_idx}, \
     and pose {self.best_pose_idx} = {self.best_energy:.3f} kcal/mol")
 
-    self.best_filename = f'/content/opt_files/{/{self.bs_object['name']}_w_conf_{self.best_conf_idx}{self.best_pose_idx}_OPTIMIZED.xyz'
+    self.best_filename = f'/content/opt_files/{self.bs_object['name']}_w_conf_{self.best_conf_idx}{self.best_pose_idx}_OPTIMIZED.xyz'
     view_from_file(self.best_filename, self.bs_object, self.frags[best_conf_idx])
   
   def run_md_from_xyz(self, temperature_K: float = 300.0, timestep_fs: float = 1.0, steps: int = 1000,
@@ -1100,7 +1113,7 @@ class UMA_Dock():
     Returns None
     """
       # Read last frame from XYZ (use index=0 for the first frame, ":" for all frames)
-    atoms = read(self.best_filename, format = 'xyz')
+    atoms = ase.io.read(self.best_filename, format = 'xyz')
     atoms.calc = self.calculator
 
       # Initialize velocities consistent with the target temperature
