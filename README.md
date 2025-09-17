@@ -92,6 +92,7 @@ e with the target protein, which can be further investigated for drug discovery 
 oses.
 ```
 ## Dynamics output (10 fs, alpha carbons fixed)
+![Watch the video here!](https://github.com/MauricioCafiero/UMADock/blob/main/video/DRD2_Carbidopa_dynamics_10fs.mp4)
 
 
 ## To-do list
