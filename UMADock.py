@@ -1119,7 +1119,7 @@ class UMA_Dock():
     atoms.info.update({"spin": total_spin, "charge": total_charge})
     
     c = FixAtoms(indices = self.bs_object['constraints'])
-    atoms_tot.set_constraint(c)
+    atoms.set_constraint(c)
     atoms.calc = self.calculator
     
 
