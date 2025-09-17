@@ -91,6 +91,8 @@ results provide valuable insights into the potential binding affinity and intera
 e with the target protein, which can be further investigated for drug discovery and development purp
 oses.
 ```
+## Dynamics output (10 fs, alpha carbons fixed)
+
 
 ## To-do list
 - Convert all lists/arrays to Numpy or Torch and either compile to C or use GPU
