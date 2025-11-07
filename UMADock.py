@@ -31,6 +31,16 @@ from fairchem.core import FAIRChemCalculator, pretrained_mlip
 from rdkit import Chem
 from rdkit.Chem import AllChem
 
+global MCR_data
+MCR_data = {
+        "file_location":"CafChem/data/MCR_QM_site.xyz",
+        "name": "MCR",
+        "charge": 0,
+        "spin": 1,
+        "constraints": [2, 10, 16, 20, 30, 35, 42, 49, 57, 66, 76, 83, 91, 97, 101, 105, 112, 116, 127, 134, 143, 154, 165, 168, 176, 187, 198, 205, 213, 217, 228, 238, 244, 252, 264, 268, 271, 278, 284, 289, 295, 301, 309, 316, 326, 334, 341, 345, 353, 363, 364, 365, 366, 382, 418],
+        "size": 924
+        }
+
 global HMGCR_data
 HMGCR_data = {
         "file_location":"CafChem/data/HMGCR_dude_QM_site.xyz",
