@@ -9,7 +9,11 @@ Docking molecules in protein binding sites using Meta's UMA MLIP as the energy s
 -  See notebooks folder for Colab examples
 -  Needs HuggingFace token and access to the Meta repo.
 
-### Run from an Agent
+## CLI_version
+-  See the CLI_version folder for an implementation to be run from the command line.
+-  inludes example scripts for running docking and MD.
+
+## Run from an Agent
 See the sample notebook for calling UMADock from an AI agent. 
 - Langgraph agent
 - Huggingface models (Phi4-mini-instruct)
