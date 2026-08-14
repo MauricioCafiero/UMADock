@@ -32,6 +32,8 @@ test_out/
 temp_files/
 frag_files/
 opt_files/
+# per-run output (optimized poses, conformers, scratch, result.json) -- never commit
+output/
 # MD / trajectory / log output
 *.traj
 *.log
@@ -42,3 +44,5 @@ md.traj
 *.png
 *.dcd
 *.xtc
+# local run journal (never commit)
+DEVLOG.md

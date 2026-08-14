@@ -26,13 +26,13 @@
 torch
 fairchem-core
 #
-# Optional: MACE foundation models as alternative scorers. Only needed if you use
-# ud.build_calculator("mace-off23") or ud.build_calculator("mace-omol") instead of
-# the default UMA. (The Modal image in modal_test.py installs this automatically.)
+# Optional: a MACE foundation model as an alternative scorer. Only needed if you use
+# ud.build_calculator("mace-omol") instead of the default UMA. (The Modal image in
+# modal_test.py installs this automatically.)
 #   pip install "mace-torch>=0.3.14"
 #
-#   from mace.calculators import mace_off, mace_mp
-#   calc = mace_off(model="medium", device="cuda")          # MACE-OFF23 (organic)
+#   from mace.calculators import mace_mp
 #   calc = mace_mp(model="<MACE-OMOL-0 release URL>", device="cuda")  # 89 elements
-# MACE-OFF23 covers ~10 elements (H,C,N,O,F,Si,P,S,Cl,Br,I); UMADock's
-# check_element_coverage() fails fast if your system has an uncovered element.
+# ('mace-off23' was removed from build_calculator: it diverges on full ~550-atom
+# capped protein binding sites in both float32 and float64 -- out of distribution.
+# MACE-OMOL-0, the MACE analog of UMA's omol task, is the MACE option to try.)

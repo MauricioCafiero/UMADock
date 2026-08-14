@@ -38,20 +38,23 @@ from rdkit.Chem import AllChem
 # ---------------------------------------------------------------------------
 # Calculator selection: UMA-Dock scores poses with any ASE calculator, so the
 # model choice is made here, not in the docking code. The default is Meta's UMA
-# (FAIRChem, omol task). Alternatives are MACE foundation models: MACE-OFF23
-# (organic, ~10 elements -- use only if every element is covered) and MACE-OMOL-0
-# (the MACE analog of UMA's omol task, 89 elements).
+# (FAIRChem, omol task). The MACE alternative is MACE-OMOL-0 (the MACE analog of
+# UMA's omol task, 89 elements). MACE-OFF23 was removed: it diverges on full
+# ~550-atom capped protein binding sites (out of distribution; trained on small
+# organics) -- see build_calculator().
 # ---------------------------------------------------------------------------
-def build_calculator(model="uma", device="cpu", mace_size="medium", mace_dtype="float32"):
+def build_calculator(model="uma", device="cpu", mace_dtype="float64"):
     """Build an ASE energy calculator for UMA-Dock scoring.
 
     Args:
-        model: 'uma' (FAIRChem UMA, default) | 'mace-off23' | 'mace-omol'.
+        model: 'uma' (FAIRChem UMA, default) | 'mace-omol'. ('mace-off23' was removed
+            -- it is trained on small organics, so its BFGS optimization DIVERGES on
+            a full ~550-atom capped protein binding site in BOTH float32 and float64
+            regardless of constraints, fmax -> ~1e8; out of distribution. Use 'uma'
+            or 'mace-omol' for protein clusters.)
         device: 'cpu' or 'cuda'.
-        mace_size: 'small' | 'medium' | 'large' (MACE-OFF23 only).
-        mace_dtype: 'float32' (default, fast) | 'float64' (slower but more accurate,
-            and very slow on T4/L4 which have poor fp64 throughput -- use only on
-            A100/H100 for a final high-precision optimization).
+        mace_dtype: 'float64' (default) | 'float32' (faster). Precision/speed tradeoff
+            for MACE. float64 is slow on T4/L4 (poor fp64 throughput); use A100/H100.
     Returns:
         an ASE calculator.
     """
@@ -61,8 +64,12 @@ def build_calculator(model="uma", device="cpu", mace_size="medium", mace_dtype="
         predictor = pretrained_mlip.get_predict_unit(name, device=device)
         return FAIRChemCalculator(predictor, task_name="omol")
     if key in ("mace_off23", "off23", "mace_off"):
-        from mace.calculators import mace_off
-        return mace_off(model=mace_size, device=device, default_dtype=mace_dtype)
+        raise ValueError(
+            "'mace-off23' is no longer supported: it diverges (fmax -> ~1e8) on a "
+            "full ~550-atom capped protein binding site in both float32 and float64 "
+            "regardless of constraints (out of distribution -- trained on small "
+            "organics). Use 'uma' (default) or 'mace-omol' instead."
+        )
     if key in ("mace_omol", "omol"):
         from mace.calculators import mace_mp
         url = os.environ.get(
@@ -70,7 +77,7 @@ def build_calculator(model="uma", device="cpu", mace_size="medium", mace_dtype="
             "https://github.com/ACEsuit/mace-foundations/releases/download/mace_omol_0/MACE-omol-0-extra-large-1024.model",
         )
         return mace_mp(model=url, device=device, default_dtype=mace_dtype)
-    raise ValueError(f"unknown model '{model}': use 'uma' | 'mace-off23' | 'mace-omol'")
+    raise ValueError(f"unknown model '{model}': use 'uma' | 'mace-omol'")
 
 
 def mace_supported_symbols(calc):
@@ -80,7 +87,7 @@ def mace_supported_symbols(calc):
 
 
 def check_element_coverage(calc, symbols, model_label="model"):
-    """Raise if a MACE `calc` doesn't cover all `symbols` (used for MACE-OFF23)."""
+    """Raise if a MACE `calc` doesn't cover all `symbols` (general MACE coverage gate)."""
     missing = set(symbols) - mace_supported_symbols(calc)
     if missing:
         raise ValueError(
@@ -319,7 +326,7 @@ class solvation():
   '''
   Class to hold all functions related to adding waters to a molecule
   '''
-  def __init__(self, atoms_l, how_many_water_radii = 2.0):
+  def __init__(self, atoms_l, how_many_water_radii = 2.0, temp_dir="temp_files"):
     '''
     Add randomly placed waters to a molecule
 
@@ -331,7 +338,9 @@ class solvation():
     self.atoms_l = atoms_l
     self.how_many_water_radii = how_many_water_radii
     self.water_vdw_rad = 1.7
-    self.water_file_loc = 'temp_files/water_temp.xyz'
+    self.temp_dir = temp_dir
+    os.makedirs(self.temp_dir, exist_ok=True)
+    self.water_file_loc = os.path.join(self.temp_dir, 'water_temp.xyz')
     ase.io.write(self.water_file_loc, self.atoms_l, format='xyz')
     print("add_waters class initialized")
   
@@ -510,7 +519,7 @@ class solvation():
     old_length = int(lines[0])
     new_length = old_length + 3*water_counter
     molecule_text = f"{new_length}" + molecule_text[2:]
-    f = open('temp_files/solvated_conf.xyz',"w")
+    f = open(os.path.join(self.temp_dir,'solvated_conf.xyz'),"w")
     f.write(molecule_text)
     f.close()
 
@@ -521,7 +530,8 @@ class UMA_Dock():
   '''
     Class for docking a ligand into a binding site
   '''
-  def __init__(self, frags: list,number_tries: int, calculator, bs_object: dict):
+  def __init__(self, frags: list,number_tries: int, calculator, bs_object: dict,
+               output_dir: str = "."):
     '''
       Main function for docking a ligand into a binding site
 
@@ -530,11 +540,19 @@ class UMA_Dock():
             number_tries: how many times at attempt fragment placement
             calculator: ASE calculator
             bs_object: dictionary for the binding site
+            output_dir: directory for run artifacts (temp_files/, frag_files/,
+              opt_files/). Defaults to the current directory (back-compatible).
     '''
     self.frags = frags
     self.number_tries = number_tries
     self.calculator = calculator
     self.bs_object = bs_object
+
+    # run artifacts write under output_dir (defaults to CWD -> back-compatible)
+    self.output_dir = output_dir
+    self.temp_dir = os.path.join(output_dir, "temp_files")
+    self.frag_dir = os.path.join(output_dir, "frag_files")
+    self.opt_dir = os.path.join(output_dir, "opt_files")
 
     self.get_binding_site_xyz()
 
@@ -681,7 +699,7 @@ class UMA_Dock():
         Returns:
             ies: the interaction energies between the binding site and the fragment
     '''
-    path = "temp_files/"
+    path = self.temp_dir + "/"
     test_files = ["complex.xyz"]
 
     all_symbols = self.atom_symbols + frag["atoms"]
@@ -764,10 +782,7 @@ class UMA_Dock():
           Returns:
               new_molecules: list of positions of successfully placed fragments
       '''
-      try:
-        os.mkdir("temp_files")
-      except:
-        print("temp_files directory already exists")
+      os.makedirs(self.temp_dir, exist_ok=True)
 
       new_molecules = []
       ies = []
@@ -882,22 +897,19 @@ class UMA_Dock():
           Returns:
               None; saves XYZ files
       '''
-      try:
-        os.mkdir("frag_files")
-      except:
-        print("frag_files directory already exists")
+      os.makedirs(self.frag_dir, exist_ok=True)
 
       try:
-          files = os.listdir("frag_files")
+          files = os.listdir(self.frag_dir)
           files_to_remove = [file for file in files if (os.path.splitext(file)[1]==".xyz")]
           for file in files_to_remove:
-            os.remove(f"frag_files/{file}")
+            os.remove(os.path.join(self.frag_dir, file))
       except:
           print("frag_files directory is empty")
 
       for k,frag in enumerate(self.frags):
           for j in range(len(self.new_molecules[k])):
-              mol_file = f"frag_files/{self.bs_object['name']}_w_{frag['name']}{j}.xyz"
+              mol_file = os.path.join(self.frag_dir, f"{self.bs_object['name']}_w_{frag['name']}{j}.xyz")
 
               all_symbols = self.atom_symbols + frag["atoms"]
               f = open(mol_file,"w")
@@ -927,7 +939,7 @@ class UMA_Dock():
           None; displays fragment pose
       '''
       frag_name = self.frags[frag_idx]["name"]
-      view_file = mol_file = f"frag_files/{self.bs_object['name']}_w_{frag_name}{pose_idx}.xyz"
+      view_file = mol_file = os.path.join(self.frag_dir, f"{self.bs_object['name']}_w_{frag_name}{pose_idx}.xyz")
       f = open(view_file,"r")
       lines = f.readlines()
       mol_data = "".join(lines)
@@ -962,7 +974,7 @@ class UMA_Dock():
             best_pose_for_fragments.append(min_idx)
             print(f"best pose for {frag['name']} is: {min:.3f} at location: {min_idx}")
             if files is not None:
-              files.download(f"frag_files/{self.bs_object['name']}_w_{frag['name']}{min_idx}.xyz")
+              files.download(os.path.join(self.frag_dir, f"{self.bs_object['name']}_w_{frag['name']}{min_idx}.xyz"))
           else:
             best_pose_for_fragments.append(-1)
             print(f"No poses for {frag['name']}")
@@ -987,7 +999,7 @@ class UMA_Dock():
             best_pose_by_distance.append(min_idx)
             print(f"best pose by distance for {frag['name']} is: {min:.3f} at location: {min_idx}")
             if files is not None:
-              files.download(f"frag_files/{self.bs_object['name']}_w_{frag['name']}{min_idx}.xyz")
+              files.download(os.path.join(self.frag_dir, f"{self.bs_object['name']}_w_{frag['name']}{min_idx}.xyz"))
           else:
             best_pose_by_distance.append(-1)
             print(f"No poses for {frag['name']}")
@@ -1054,9 +1066,9 @@ class UMA_Dock():
         strain_energy: the strain energy
         desolvation_energy: the desolvation energy
     '''
-    solvate = solvation(atoms_ligand,2)
+    solvate = solvation(atoms_ligand, 2, temp_dir=self.temp_dir)
     solvate.add_waters(20)
-    solv_atoms = ase.io.read('temp_files/solvated_conf.xyz', format='xyz')
+    solv_atoms = ase.io.read(os.path.join(self.temp_dir, 'solvated_conf.xyz'), format='xyz')
     solv_atoms.info.update({"spin": frag['spin'], "charge": frag['charge']})
     solv_atoms.calc = self.calculator
 
@@ -1104,16 +1116,13 @@ class UMA_Dock():
           opt_ies: list of optimized interaction energies
           elec_bind_es: list of electronic binding energies
     '''
-    try:
-        os.mkdir("opt_files")
-    except:
-      print("opt_files directory already exists")
+    os.makedirs(self.opt_dir, exist_ok=True)
 
     try:
-        files = os.listdir("opt_files")
+        files = os.listdir(self.opt_dir)
         files_to_remove = [file for file in files if (os.path.splitext(file)[1]==".xyz")]
         for file in files_to_remove:
-          os.remove(f"opt_files/{file}")
+          os.remove(os.path.join(self.opt_dir, file))
     except:
         print("opt_files directory is empty")
 
@@ -1128,24 +1137,32 @@ class UMA_Dock():
 
     opt_ies = []
     elec_bind_es = []
+    strain_energies = []
+    desolvation_energies = []
     for pose, frag in zip(poses, self.frags):
       if pose != -1:
-        opt_e, atoms, atoms_ligand = self.opt_conformation(f"frag_files/{self.bs_object['name']}_w_{frag['name']}{pose}.xyz", frag)
-        ase.io.write(f"opt_files/{self.bs_object['name']}_w_{frag['name']}{pose}_OPTIMIZED.xyz", atoms, 'xyz')
+        opt_e, atoms, atoms_ligand = self.opt_conformation(os.path.join(self.frag_dir, f"{self.bs_object['name']}_w_{frag['name']}{pose}.xyz"), frag)
+        ase.io.write(os.path.join(self.opt_dir, f"{self.bs_object['name']}_w_{frag['name']}{pose}_OPTIMIZED.xyz"), atoms, 'xyz')
         opt_ies.append(opt_e)
 
         strain_energy, desolvation_energy = self.desolvation_strain(atoms_ligand, frag)
+        strain_energies.append(strain_energy)
+        desolvation_energies.append(desolvation_energy)
         elec_bind_es.append(opt_e+strain_energy+desolvation_energy)
         print(f'Total energy = {opt_e+strain_energy+desolvation_energy} kcal/mol')
-        
+
       else:
         opt_ies.append(-1)
         elec_bind_es.append(-1)
+        strain_energies.append(-1)
+        desolvation_energies.append(-1)
         print(f"No poses for {frag['name']}")
 
     self.opt_ies = opt_ies
     self.elec_bind_es = elec_bind_es
-    
+    self.strain_energies = strain_energies
+    self.desolvation_energies = desolvation_energies
+
     return self.opt_ies, self.elec_bind_es
   
   def show_best(self):
@@ -1172,7 +1189,7 @@ class UMA_Dock():
     print(f"The lowest elecronic binding energy came from conformer {self.best_conf_idx}, \
     and pose {self.best_pose_idx} = {self.best_energy:.3f} kcal/mol")
 
-    self.best_filename = f"/content/opt_files/{self.bs_object['name']}_w_conf_{self.best_conf_idx}{self.best_pose_idx}_OPTIMIZED.xyz"
+    self.best_filename = os.path.join(self.opt_dir, f"{self.bs_object['name']}_w_conf_{self.best_conf_idx}{self.best_pose_idx}_OPTIMIZED.xyz")
     view_from_file(self.best_filename, self.bs_object, self.frags[self.best_conf_idx])
   
   def run_md_from_xyz(self, temperature_K: float = 300.0, timestep_fs: float = 1.0, steps: int = 1000,

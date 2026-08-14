@@ -21,9 +21,10 @@ from the sibling ``openmm`` repo:
      charges sum to the integer formal charge of each residue). ``spin`` defaults
      to 1 (closed shell).
   5. Write the cluster XYZ (element symbols + A coords) and return a ``bs_object``
-     ready to hand to ``UMA_Dock``. ``constraints`` are the cap atoms -- the
-     artificial anchors fixed during UMA's constrained optimization, mirroring the
-     hand-built sites.
+     ready to hand to ``UMA_Dock``. ``constraints`` are the alpha carbons (Cα) of
+     the selected residues -- one backbone anchor per residue, fixed during UMA's
+     constrained optimization, mirroring the hand-built ``*_QM_site.xyz`` sites
+     (which pin exactly the Cα of every residue; the ACE/NME caps are left free).
 
 Ligand atoms are NOT written into the binding-site XYZ (the ligand is docked
 separately by UMADock); they are only used to define the site.
@@ -138,30 +139,47 @@ def _heavy_pos_ang(atom, pos_ang):
     return np.array([float(p[0]), float(p[1]), float(p[2])])
 
 
-def _select_residues(topology, pos_ang, ligand_resname, cutoff):
+def _select_residues(topology, pos_ang, ligand_resname, cutoff, chain=None):
     """Protein residues with a heavy atom within ``cutoff`` A of a ligand heavy atom.
 
-    Returns the list of selected Residue objects (OpenMM topology residues) and
-    the ligand heavy-atom coords (for reporting).
+    Selection is restricted to ONE ligand copy (one chain) so that an oligomer
+    with multiple ligand copies does not get fused into a single nonsense site.
+    ``chain`` selects the chain id of the ligand copy to build around; if None it
+    defaults to the chain of the first ligand residue found in the topology.
+    Protein residues are taken from that same chain only (a coherent pocket).
+
+    Returns the list of selected Residue objects (OpenMM topology residues), the
+    ligand heavy-atom coords (for reporting), and the resolved chain id.
     """
-    lig_pts = []
-    for res in topology.residues():
-        if res.name.strip().upper() != ligand_resname.strip().upper():
-            continue
-        for a in res.atoms():
-            p = _heavy_pos_ang(a, pos_ang)
-            if p is not None:
-                lig_pts.append(p)
-    if not lig_pts:
+    lig_residues = [r for r in topology.residues()
+                    if r.name.strip().upper() == ligand_resname.strip().upper()]
+    if not lig_residues:
         raise ValueError(
             f"no ligand residue named {ligand_resname!r} found (with heavy atoms) "
             f"in the PDB. Check the residue name / chain."
         )
+    # resolve the chain: explicit, else the chain of the first ligand copy
+    if chain is None:
+        chain = lig_residues[0].chain.id
+    lig_residues = [r for r in lig_residues if r.chain.id == chain]
+    if not lig_residues:
+        raise ValueError(
+            f"no ligand residue {ligand_resname!r} on chain {chain!r}. "
+            f"Found copies on chains: {sorted({r.chain.id for r in topology.residues() if r.name.strip().upper()==ligand_resname.strip().upper()})}."
+        )
+    lig_pts = []
+    for res in lig_residues:
+        for a in res.atoms():
+            p = _heavy_pos_ang(a, pos_ang)
+            if p is not None:
+                lig_pts.append(p)
     lig_pts = np.array(lig_pts)
 
     selected = []
     for res in topology.residues():
         if res.name not in PROTEIN_RES:
+            continue
+        if res.chain.id != chain:
             continue
         pts = [p for a in res.atoms() if (p := _heavy_pos_ang(a, pos_ang)) is not None]
         if not pts:
@@ -170,7 +188,7 @@ def _select_residues(topology, pos_ang, ligand_resname, cutoff):
         d = np.linalg.norm(pts[:, None, :] - lig_pts[None, :, :], axis=-1)
         if d.min() <= cutoff:
             selected.append(res)
-    return selected, lig_pts
+    return selected, lig_pts, chain
 
 
 # ---------------------------------------------------------------------------
@@ -243,7 +261,8 @@ def build_cluster(topology, pos_ang, selected):
     ff14SB names it "CH3", so we add the cap H ourselves with the ff14SB names).
 
     Returns (topology, positions_nm, cap_atom_indices, n_res). ``cap_atom_indices``
-    are local atom indices of every ACE/NME atom -- the UMA constraint anchors.
+    are local atom indices of every ACE/NME atom (informational only -- the UMA
+    constraints are the residue Cα, assigned later in ``prepare_binding_site``).
     """
     # group selected residues by chain, ordered by resSeq
     chains = {}
@@ -254,7 +273,7 @@ def build_cluster(topology, pos_ang, selected):
 
     new_top = app.Topology()
     new_positions = []           # angstrom
-    cap_atom_indices = []        # local indices of cap atoms (constraints)
+    cap_atom_indices = []        # local indices of cap atoms (informational; NOT constraints)
 
     new_chain = new_top.addChain()  # one chain for the whole cluster
     local_i = 0
@@ -418,6 +437,7 @@ def prepare_binding_site(
     output_dir: str | Path = ".",
     output_xyz: str | Path | None = None,
     write_pdb: bool = True,
+    chain: str | None = None,
 ):
     """Build a UMA-Dock binding-site cluster from any PDB + ligand residue name.
 
@@ -437,6 +457,12 @@ def prepare_binding_site(
         output_xyz: explicit output XYZ path; defaults to ``<name>.xyz`` in
             ``output_dir``.
         write_pdb: also write a capped-cluster PDB for inspection.
+        chain: chain id of the ligand copy to build the site around. ``None`` (the
+            default) uses the first ligand copy found. This matters for oligomeric
+            structures (e.g. 2A3R is a homodimer with one dopamine per monomer):
+            without it, the pockets of every ligand copy get fused into one
+            nonsense site spanning the whole oligomer. Pass ``chain="A"`` (etc.) to
+            pick a specific copy.
 
     Returns:
         bs_object dict (file_location, name, charge, spin, constraints, size)
@@ -457,10 +483,12 @@ def prepare_binding_site(
     topology = fixer.topology
     pos_ang = fixer.positions.value_in_unit(unit.angstrom)
 
-    # 2. select residues near the ligand
-    selected, lig_pts = _select_residues(topology, pos_ang, ligand_resname, cutoff)
+    # 2. select residues near the ligand (one chain / one ligand copy)
+    selected, lig_pts, resolved_chain = _select_residues(
+        topology, pos_ang, ligand_resname, cutoff, chain=chain)
     print(f"[prep-site] {len(selected)} protein residues within {cutoff} A of "
-          f"ligand {ligand_resname!r} ({len(lig_pts)} ligand heavy atoms)")
+          f"ligand {ligand_resname!r} on chain {resolved_chain} "
+          f"({len(lig_pts)} ligand heavy atoms)")
 
     # 3. build the capped, hydrogenated cluster (residue H from PDBFixer +
     #    manually placed cap H -- see build_cluster for why addHydrogens can't
@@ -469,7 +497,7 @@ def prepare_binding_site(
         topology, pos_ang, selected
     )
     print(f"[prep-site] cluster: {n_res} residues (incl. caps), "
-          f"{cluster_top.getNumAtoms()} atoms, {len(cap_idx)} cap (constraint) atoms")
+          f"{cluster_top.getNumAtoms()} atoms, {len(cap_idx)} cap atoms")
 
     # 4. net formal charge from the ff14SB partial-charge sum
     charge, modeller = _net_charge(cluster_top, cluster_pos_nm)
@@ -499,15 +527,17 @@ def prepare_binding_site(
         with open(output_dir / f"{name}_capped.pdb", "w") as f:
             app.PDBFile.writeFile(final_top, modeller.positions, f, keepIds=True)
 
-    # constraints: every cap atom (the artificial anchors held fixed during
-    # UMA's constrained optimization, mirroring the hand-built sites). Caps are
-    # the ACE/NME residues in the final topology.
+    # constraints: the alpha carbon (Cα) of every selected protein residue -- the
+    # backbone anchors held fixed during UMA's constrained optimization, matching
+    # the hand-built *_QM_site.xyz sites (one Cα per residue). The ACE/NME caps are
+    # left free to relax into the cut termini (the hand-built sites simply had no
+    # caps, so there was nothing else to pin).
     constraints = [a.index for a in final_top.atoms()
-                  if a.residue.name in ("ACE", "NME")]
+                  if a.name == "CA" and a.residue.name in PROTEIN_RES]
 
     size = final_top.getNumAtoms()
     print(f"[prep-site] wrote {output_xyz} ({size} atoms, "
-          f"{len(constraints)} constraints)")
+          f"{len(constraints)} Cα constraints)")
     return {
         "file_location": str(output_xyz),
         "name": name,
@@ -530,11 +560,16 @@ if __name__ == "__main__":
     p.add_argument("-n", "--name", default=None, help="binding-site name")
     p.add_argument("--spin", type=int, default=1, help="total spin (multiplicity)")
     p.add_argument("-o", "--output-dir", default=".", help="output directory")
+    p.add_argument("--chain", default=None,
+                   help="chain id of the ligand copy to build the site around "
+                        "(default: first ligand copy). For oligomers with one ligand "
+                        "per monomer, pick one to avoid fusing the pockets.")
     args = p.parse_args()
 
     bs = prepare_binding_site(
         args.pdb, args.ligand, cutoff=args.cutoff, ph=args.ph,
         name=args.name, spin=args.spin, output_dir=args.output_dir,
+        chain=args.chain,
     )
     print("\nbs_object:")
     for k, v in bs.items():
