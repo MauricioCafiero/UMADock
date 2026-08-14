@@ -47,8 +47,8 @@ python prep_binding_site.py 2A3R.pdb LDP -c 4 --ph 7 -n SULT1A3 -o out/ --chain 
 ### From Python
 ```python
 import prep_binding_site as prep
-# chain= restricts the site to one ligand copy's chain -- required for oligomers
-# (2A3R is a homodimer; without chain= both monomers' pockets fuse into one spurious site)
+# chain= restricts the site to one ligand copy's chain -- needed for oligomers
+# (2A3R is a homodimer; chain="A" keeps the site to one protomer's pocket)
 bs = prep.prepare_binding_site("2A3R.pdb", "LDP", cutoff=4.0, ph=7.0, name="SULT1A3",
                                output_dir="out", chain="A")
 # bs is the dict you'd otherwise have to write by hand:
@@ -57,9 +57,9 @@ bs = prep.prepare_binding_site("2A3R.pdb", "LDP", cutoff=4.0, ph=7.0, name="SULT
 ```
 
 > **Oligomers — pass `--chain` / `chain=`.** `prepare_binding_site` selects residues
-> around *every* copy of the ligand. For a homodimer like 2A3R that fuses both
-> monomers' pockets into one spurious ~550-atom site spanning ~84 Å (the two pocket
-> centroids sit 45 Å apart). Restricting to `--chain A` yields a single coherent
+> around *every* copy of the ligand, so for an oligomer with the same ligand in each
+> chain it would span every protomer. Pass `--chain` to restrict the site to one
+> ligand copy's chain. For 2A3R (a homodimer), `--chain A` yields a single coherent
 > pocket: **275 atoms, 10 residues, net charge −1**.
 >
 > **Charged residues** (SULT1A3 / 2A3R chain A, ff14SB at pH 7): LYS106 (+1),
@@ -145,11 +145,8 @@ during optimization (the ACE/NME caps relax freely).
 Optimized best poses for paracetamol in the SULT1A3 (2A3R chain A) pocket — UMA (left, −34.94 kcal/mol) and MACE-OMOL (right, −4.91 kcal/mol).
 
 Both scorers give **negative (favorable)** binding energies for paracetamol in the
-corrected single-chain pocket — paracetamol sits in a real pocket and makes
-favorable contacts. (An earlier run on the dimer-fused 550-atom site gave spurious
-*positive* energies — +11.7 / +11.2 — because the ligand docked at the union centroid
-of two pockets 45 Å apart and touched nothing; that result is invalidated.) The two
-scorers disagree on magnitude (UMA far more favorable), which is expected for
+single-chain pocket — paracetamol sits in a real pocket and makes favorable contacts.
+The two scorers disagree on magnitude (UMA far more favorable), which is expected for
 different MLIPs on a small-molecule/protein interface; the **sign agreement** is what
 validates the full PDB-forced pipeline: fetch → `prepare_binding_site` (chain A) →
 conformers → dock → optimize → desolvation/strain → binding energy.
@@ -215,10 +212,12 @@ model = "UMA-OMOL"
 The example below prepares the binding site straight from a PDB + ligand name, then docks. Replace the old hand-built `ud.DRD2_data` / `ud.HMGCR_data` dicts with a `prepare_binding_site` call for any target.
 ```
 
-def dock_total(smiles: str, pdb_path: str, ligand_resname: str):
+def dock_total(smiles: str, pdb_path: str, ligand_resname: str, chain: str = None):
   '''
     Dock `smiles` into the binding site defined by `ligand_resname` in `pdb_path`.
-    The binding site is prepared on the fly (no hand-pruning needed).
+    The binding site is prepared on the fly (no hand-pruning needed). Pass `chain`
+    for oligomers (e.g. chain="A" for the 2A3R homodimer) to keep the site to one
+    protomer's pocket.
   '''
   test_confs = ud.conformers(smiles,20)
   em_mols = test_confs.get_confs(use_random=True)
@@ -226,7 +225,7 @@ def dock_total(smiles: str, pdb_path: str, ligand_resname: str):
   xyz_strings = test_confs.get_XYZ_strings()
   confs = test_confs.prep_XYZ_docking()
 
-  bs = prep.prepare_binding_site(pdb_path, ligand_resname, cutoff=4.0, name=ligand_resname)
+  bs = prep.prepare_binding_site(pdb_path, ligand_resname, cutoff=4.0, name=ligand_resname, chain=chain)
   ldopa_dock = ud.UMA_Dock(confs, 20, calculator, bs)
 
   new_molecules, ies, distances = ldopa_dock.dock()
