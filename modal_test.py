@@ -110,7 +110,7 @@ image = (
 def run_test(smiles: str, ligand_resname: str, name: str,
              num_confs: int = 5, number_tries: int = 200,
              criteria: str = "distance", cutoff: float = 4.0, ph: float = 7.0,
-             model: str = "uma", mace_size: str = "medium",
+             model: str = "uma", mace_size: str = "medium", mace_dtype: str = "float32",
              pdb_id: str | None = None, pdb_text: str | None = None) -> dict:
     """Dock `smiles` into the binding site defined by `ligand_resname` in a PDB.
 
@@ -155,7 +155,8 @@ def run_test(smiles: str, ligand_resname: str, name: str,
     # 3. calculator (UMA by default; or MACE-OFF23 / MACE-OMOL-0)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"[dock] loading scorer '{model}' on {device} (first run downloads weights)")
-    calculator = ud.build_calculator(model, device=device, mace_size=mace_size)
+    calculator = ud.build_calculator(model, device=device, mace_size=mace_size,
+                                     mace_dtype=mace_dtype)
 
     # 4. query-ligand conformers
     print(f"[dock] generating {num_confs} conformers for {smiles}")
@@ -221,6 +222,7 @@ def main(smiles: str = "CC(=O)Nc1ccc(O)cc1",   # paracetamol
         name: str = "SULT1A3",
         model: str = "uma",                    # uma | mace-off23 | mace-omol
         mace_size: str = "medium",             # small|medium|large (mace-off23)
+        mace_dtype: str = "float32",           # float32 (fast) | float64 (accurate, slow on T4)
         num_confs: int = 5, number_tries: int = 200,
         criteria: str = "distance", cutoff: float = 4.0, ph: float = 7.0):
     """Dock `smiles` into the binding site of `ligand_resname` in a PDB.
@@ -235,7 +237,7 @@ def main(smiles: str = "CC(=O)Nc1ccc(O)cc1",   # paracetamol
         smiles=smiles, ligand_resname=ligand_resname, name=name,
         num_confs=num_confs, number_tries=number_tries,
         criteria=criteria, cutoff=cutoff, ph=ph,
-        model=model, mace_size=mace_size,
+        model=model, mace_size=mace_size, mace_dtype=mace_dtype,
         pdb_id=None if pdb_path else pdb_id, pdb_text=pdb_text,
     )
     print("\n===== SUMMARY =====")

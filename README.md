@@ -72,6 +72,8 @@ UMA-Dock scores poses with any ASE calculator, so the energy model is pluggable.
 | `mace-off23` | MACE-OFF23 organic force field | ~10 (H, C, N, O, F, Si, P, S, Cl, Br, I) | the runner checks the actual binding-site + ligand elements and **fails fast** if any are uncovered (then use `mace-omol`/`uma`). Size via `--mace-size` small\|medium\|large. |
 | `mace-omol` | MACE-OMOL-0 — the MACE analog of UMA's omol task | 89 | use when MACE-OFF23 lacks an element, or you want the OMOL model. Checkpoint URL overridable via `UMADOCK_MACE_OMOL_URL`. |
 
+MACE runs in **float32 by default** (`--mace-dtype float32`, fast on T4/L4). Use `--mace-dtype float64` only for a final high-precision optimization on a GPU with real fp64 throughput (A100/H100) — float64 on a T4 is ~1/64 the speed and makes a run take hours.
+
 Model weights (UMA and MACE) are cached in Modal Volumes after the first run so later runs skip the download. MACE needs `mace-torch>=0.3.14` (installed in the Modal image; add it to your local env with `pip install mace-torch` if you use `build_calculator("mace-...")` locally).
 
 **Sampling:** placement tries the ligand center on a Gaussian whose σ is the binding site's spatial spread and keeps a pose only if it lands within 5 Å of the site center. A ~550-atom site has a large σ, so the old 10-try default gives ~0 accepted poses — the script default is now 200 tries. The dock phase (single-point UMA evals) is cheap; only the per-pose optimization + desolvation is costly, so scaling `--number-tries` is nearly free — scale it up for larger sites.

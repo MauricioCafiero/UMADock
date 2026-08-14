@@ -42,13 +42,16 @@ from rdkit.Chem import AllChem
 # (organic, ~10 elements -- use only if every element is covered) and MACE-OMOL-0
 # (the MACE analog of UMA's omol task, 89 elements).
 # ---------------------------------------------------------------------------
-def build_calculator(model="uma", device="cpu", mace_size="medium"):
+def build_calculator(model="uma", device="cpu", mace_size="medium", mace_dtype="float32"):
     """Build an ASE energy calculator for UMA-Dock scoring.
 
     Args:
         model: 'uma' (FAIRChem UMA, default) | 'mace-off23' | 'mace-omol'.
         device: 'cpu' or 'cuda'.
         mace_size: 'small' | 'medium' | 'large' (MACE-OFF23 only).
+        mace_dtype: 'float32' (default, fast) | 'float64' (slower but more accurate,
+            and very slow on T4/L4 which have poor fp64 throughput -- use only on
+            A100/H100 for a final high-precision optimization).
     Returns:
         an ASE calculator.
     """
@@ -59,14 +62,14 @@ def build_calculator(model="uma", device="cpu", mace_size="medium"):
         return FAIRChemCalculator(predictor, task_name="omol")
     if key in ("mace_off23", "off23", "mace_off"):
         from mace.calculators import mace_off
-        return mace_off(model=mace_size, device=device)
+        return mace_off(model=mace_size, device=device, default_dtype=mace_dtype)
     if key in ("mace_omol", "omol"):
         from mace.calculators import mace_mp
         url = os.environ.get(
             "UMADOCK_MACE_OMOL_URL",
             "https://github.com/ACEsuit/mace-foundations/releases/download/mace_omol_0/MACE-omol-0-extra-large-1024.model",
         )
-        return mace_mp(model=url, device=device, default_dtype="float32")
+        return mace_mp(model=url, device=device, default_dtype=mace_dtype)
     raise ValueError(f"unknown model '{model}': use 'uma' | 'mace-off23' | 'mace-omol'")
 
 
