@@ -34,6 +34,58 @@ from fairchem.core import FAIRChemCalculator, pretrained_mlip
 from rdkit import Chem
 from rdkit.Chem import AllChem
 
+
+# ---------------------------------------------------------------------------
+# Calculator selection: UMA-Dock scores poses with any ASE calculator, so the
+# model choice is made here, not in the docking code. The default is Meta's UMA
+# (FAIRChem, omol task). Alternatives are MACE foundation models: MACE-OFF23
+# (organic, ~10 elements -- use only if every element is covered) and MACE-OMOL-0
+# (the MACE analog of UMA's omol task, 89 elements).
+# ---------------------------------------------------------------------------
+def build_calculator(model="uma", device="cpu", mace_size="medium"):
+    """Build an ASE energy calculator for UMA-Dock scoring.
+
+    Args:
+        model: 'uma' (FAIRChem UMA, default) | 'mace-off23' | 'mace-omol'.
+        device: 'cpu' or 'cuda'.
+        mace_size: 'small' | 'medium' | 'large' (MACE-OFF23 only).
+    Returns:
+        an ASE calculator.
+    """
+    key = (model or "uma").lower().replace("-", "_")
+    if key in ("uma",):
+        name = os.environ.get("UMADOCK_UMA_MODEL", "uma-s-1p1")  # fairchem renamed uma-s-1
+        predictor = pretrained_mlip.get_predict_unit(name, device=device)
+        return FAIRChemCalculator(predictor, task_name="omol")
+    if key in ("mace_off23", "off23", "mace_off"):
+        from mace.calculators import mace_off
+        return mace_off(model=mace_size, device=device)
+    if key in ("mace_omol", "omol"):
+        from mace.calculators import mace_mp
+        url = os.environ.get(
+            "UMADOCK_MACE_OMOL_URL",
+            "https://github.com/ACEsuit/mace-foundations/releases/download/mace_omol_0/MACE-omol-0-extra-large-1024.model",
+        )
+        return mace_mp(model=url, device=device, default_dtype="float32")
+    raise ValueError(f"unknown model '{model}': use 'uma' | 'mace-off23' | 'mace-omol'")
+
+
+def mace_supported_symbols(calc):
+    """Element symbols a loaded MACE calculator supports (from its Z table)."""
+    from ase.data import chemical_symbols
+    return {chemical_symbols[int(z)] for z in calc.models[0].atomic_numbers}
+
+
+def check_element_coverage(calc, symbols, model_label="model"):
+    """Raise if a MACE `calc` doesn't cover all `symbols` (used for MACE-OFF23)."""
+    missing = set(symbols) - mace_supported_symbols(calc)
+    if missing:
+        raise ValueError(
+            f"{model_label} does not cover element(s) {sorted(missing)} "
+            f"(supports {len(mace_supported_symbols(calc))} elements). "
+            f"Use model 'mace-omol' (89 elements) or 'uma' instead.")
+
+
 global MCR_data
 MCR_data = {
         "file_location":"CafChem/data/MCR_QM_site.xyz",

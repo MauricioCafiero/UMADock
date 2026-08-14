@@ -25,3 +25,14 @@
 # for real docking (each pose is a single-point + opt energy eval on the cluster).
 torch
 fairchem-core
+#
+# Optional: MACE foundation models as alternative scorers. Only needed if you use
+# ud.build_calculator("mace-off23") or ud.build_calculator("mace-omol") instead of
+# the default UMA. (The Modal image in modal_test.py installs this automatically.)
+#   pip install "mace-torch>=0.3.14"
+#
+#   from mace.calculators import mace_off, mace_mp
+#   calc = mace_off(model="medium", device="cuda")          # MACE-OFF23 (organic)
+#   calc = mace_mp(model="<MACE-OMOL-0 release URL>", device="cuda")  # 89 elements
+# MACE-OFF23 covers ~10 elements (H,C,N,O,F,Si,P,S,Cl,Br,I); UMADock's
+# check_element_coverage() fails fast if your system has an uncovered element.

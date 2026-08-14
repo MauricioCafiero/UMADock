@@ -19,11 +19,11 @@ conf_run = 260
 outfile = f"{bs['name']}_{molecule}_{conf_run}_{num_steps}steps_md"
 
 print('========================================================')
-print(f'MD for {molecule} in {bs['name']}')
+print(f"MD for {molecule} in {bs['name']}")
 print(f'{num_steps} steps')
 print(f'charge: {charge}, spin: {spin}')
 
-predictor = pretrained_mlip.get_predict_unit("uma-s-1", device=device)
+predictor = pretrained_mlip.get_predict_unit("uma-s-1p1", device=device)
 calculator = FAIRChemCalculator(predictor, task_name="omol")
 model = "UMA-OMOL"
 

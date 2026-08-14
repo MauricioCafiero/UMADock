@@ -53,11 +53,26 @@ modal run modal_test.py
 modal run modal_test.py --smiles "CC(=O)Nc1ccc(O)cc1" --pdb-id 2A3R --ligand-resname LDP --name SULT1A3
 modal run modal_test.py --smiles "CC(=O)Oc1ccccc1C(=O)O" --pdb-path ./my_protein.pdb --ligand-resname LIG --name MYT
 
+# choose the scoring model (default uma): Meta UMA, MACE-OFF23, or MACE-OMOL-0
+modal run modal_test.py --model mace-omol --smiles "CC(=O)Nc1ccc(O)cc1" --pdb-id 2A3R --ligand-resname LDP --name SULT1A3
+modal run modal_test.py --model mace-off23 --mace-size medium --smiles "..." --pdb-id 1AKE --ligand-resname LIG --name ADK
+
 # faster GPU, more conformers:
 UMADOCK_GPU=A10G modal run modal_test.py --num-confs 20 --number-tries 200
 ```
 
-GPU is set by the `UMADOCK_GPU` env var (default T4; A10G ~$1.10, A100 ~$2.10/hr) — not a flag, because the flag would be read after the container's GPU is already bound. The UMA model defaults to `uma-s-1p1` (current fairchem-core renamed the bare `uma-s-1`); override with `UMADOCK_UMA_MODEL`. The UMA weights are cached in a Modal Volume after the first run so later runs skip the (multi-GB) download.
+GPU is set by the `UMADOCK_GPU` env var (default T4; A10G ~$1.10, A100 ~$2.10/hr) — not a flag, because the flag would be read after the container's GPU is already bound.
+
+### Scoring model (`--model`)
+UMA-Dock scores poses with any ASE calculator, so the energy model is pluggable. `--model` selects one (see `build_calculator()` in `UMADock.py`):
+
+| `--model` | what | elements | notes |
+|---|---|---|---|
+| `uma` (default) | Meta's UMA via FAIRChem (omol task) | broad | needs the HF secret + Meta FAIR-Chem repo access. Model id defaults to `uma-s-1p1` (fairchem renamed the bare `uma-s-1`); override with `UMADOCK_UMA_MODEL`. |
+| `mace-off23` | MACE-OFF23 organic force field | ~10 (H, C, N, O, F, Si, P, S, Cl, Br, I) | the runner checks the actual binding-site + ligand elements and **fails fast** if any are uncovered (then use `mace-omol`/`uma`). Size via `--mace-size` small\|medium\|large. |
+| `mace-omol` | MACE-OMOL-0 — the MACE analog of UMA's omol task | 89 | use when MACE-OFF23 lacks an element, or you want the OMOL model. Checkpoint URL overridable via `UMADOCK_MACE_OMOL_URL`. |
+
+Model weights (UMA and MACE) are cached in Modal Volumes after the first run so later runs skip the download. MACE needs `mace-torch>=0.3.14` (installed in the Modal image; add it to your local env with `pip install mace-torch` if you use `build_calculator("mace-...")` locally).
 
 **Sampling:** placement tries the ligand center on a Gaussian whose σ is the binding site's spatial spread and keeps a pose only if it lands within 5 Å of the site center. A ~550-atom site has a large σ, so the old 10-try default gives ~0 accepted poses — the script default is now 200 tries. The dock phase (single-point UMA evals) is cheap; only the per-pose optimization + desolvation is costly, so scaling `--number-tries` is nearly free — scale it up for larger sites.
 
@@ -89,12 +104,14 @@ See the sample notebook for calling UMADock from an AI agent.
 Two tiers of dependencies:
 - **`requirements.txt`** (openmm, pdbfixer, rdkit, ase, py3Dmol, numpy, scipy, pandas, matplotlib) — enough to run **`prep_binding_site.py`** and the plotting/analysis helpers.
 - **`requirements-mlip.txt`** (torch + fairchem-core) — **required to import `UMADock.py` at all** (it imports torch/fairchem at module top), and to actually score poses with UMA. Needs a HuggingFace token + access to Meta's FAIR-Chem repo (see `requirements-mlip.txt`).
+- **optional:** `mace-torch>=0.3.14` — only if you use `build_calculator("mace-off23"|"mace-omol")` (MACE-OFF23 / MACE-OMOL-0) instead of UMA. The Modal image installs it automatically.
 
 ### Local (venv, Python 3.11)
 ```sh
 uv venv --python 3.11 .venv && source .venv/bin/activate
 pip install -r requirements.txt          # core
 pip install -r requirements-mlip.txt     # torch + fairchem-core (HF token needed for the UMA weights)
+pip install "mace-torch>=0.3.14"         # optional: MACE-OFF23 / MACE-OMOL-0 scorers
 ```
 The root `UMADock.py` imports fine locally (the Colab-only `google.colab` import is guarded). The `CLI_version/UMADock.py` variant has the Colab bits commented out for a pure-CLI run.
 

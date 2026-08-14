@@ -15,7 +15,7 @@ print('')
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-predictor = pretrained_mlip.get_predict_unit("uma-s-1", device=device)
+predictor = pretrained_mlip.get_predict_unit("uma-s-1p1", device=device)
 calculator = FAIRChemCalculator(predictor, task_name="omol")
 model = "UMA-OMOL"
 print(f'Loaded the {model} model. ')
@@ -40,7 +40,7 @@ confs = test_confs.prep_XYZ_docking(charge = charge)
 bs = ud.MCR_data
 num_confs = 40
 
-print(f'Binding site: {bs['name']}')
+print(f"Binding site: {bs['name']}")
 print(f'Generating {num_confs} conformations for the ligand.')
 print('')
 
