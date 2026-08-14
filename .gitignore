@@ -1,0 +1,44 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+*.so
+
+# --- virtual envs ---
+.venv/
+venv/
+env/
+
+# --- editor / OS ---
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# --- large media: keep the folder/readme, ignore the mp4s ---
+video/*.mp4
+*.mp4
+
+# --- UMA-Dock generated artifacts (regenerate from the scripts/notebooks) ---
+# binding-site prep output
+test_out/
+*_site.xyz
+*_capped.pdb
+# docking working directories
+temp_files/
+frag_files/
+opt_files/
+# MD / trajectory / log output
+*.traj
+*.log
+md.log
+md.traj
+
+# --- misc generated files ---
+*.png
+*.dcd
+*.xtc

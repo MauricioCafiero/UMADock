@@ -1,0 +1,25 @@
+# UMA-Dock core dependencies (binding-site prep + docking + analysis + MD).
+# Install into a fresh venv (Python 3.11 recommended -- openmm/pdbfixer/rdkit
+# wheels are available for 3.11/3.12):
+#
+#   uv venv --python 3.11 .venv && source .venv/bin/activate
+#   pip install -r requirements.txt
+#
+# The MLIP energy model (Meta's UMA via fairchem-core + torch + a HuggingFace
+# token) is heavy and gated -- see requirements-mlip.txt. The binding-site
+# prep (`prep_binding_site.py`) and all analysis/plotting run without it; you
+# only need it for the actual UMA energy evaluations in `UMA_Dock`.
+
+# binding-site preparation (prep_binding_site.py): repairs any PDB with PDBFixer,
+# finds residues near the ligand, caps cut termini, assigns ff14SB charges.
+openmm>=8.2
+pdbfixer>=1.9
+
+# docking / conformer generation / visualization / MD / analysis
+rdkit>=2024.3
+ase>=3.23
+py3Dmol>=2.0
+numpy
+scipy
+pandas
+matplotlib

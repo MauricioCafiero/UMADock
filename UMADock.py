@@ -7,7 +7,10 @@ import py3Dmol
 import os
 import ase.io
 import torch
-from google.colab import files
+try:
+    from google.colab import files   # Colab-only download helper (no-op elsewhere)
+except ImportError:
+    files = None
 from ase.calculators.calculator import all_changes
 from ase.optimize import BFGS
 from ase.constraints import FixAtoms
@@ -379,9 +382,9 @@ class solvation():
     rot_water_xyz += f"H {rot_h2_xyz[0].item()}   {rot_h2_xyz[1].item()}    {rot_h2_xyz[2].item()}\n"
 
     rot_water_coordinates = []
-    rot_water_coordinates.append([o_xyz[0], o_xyz[1], o_xyz[2]])
-    rot_water_coordinates.append([rot_h1_xyz[0], rot_h1_xyz[1], rot_h1_xyz[2]])
-    rot_water_coordinates.append([rot_h2_xyz[0], rot_h2_xyz[1], rot_h2_xyz[2]])
+    rot_water_coordinates.append([o_xyz[0].item(), o_xyz[1].item(), o_xyz[2].item()])
+    rot_water_coordinates.append([rot_h1_xyz[0].item(), rot_h1_xyz[1].item(), rot_h1_xyz[2].item()])
+    rot_water_coordinates.append([rot_h2_xyz[0].item(), rot_h2_xyz[1].item(), rot_h2_xyz[2].item()])
 
     return rot_water_xyz, rot_water_coordinates
 
@@ -903,7 +906,8 @@ class UMA_Dock():
             min_idx = np.argmin(energy)
             best_pose_for_fragments.append(min_idx)
             print(f"best pose for {frag['name']} is: {min:.3f} at location: {min_idx}")
-            files.download(f"frag_files/{self.bs_object['name']}_w_{frag['name']}{min_idx}.xyz")
+            if files is not None:
+              files.download(f"frag_files/{self.bs_object['name']}_w_{frag['name']}{min_idx}.xyz")
           else:
             best_pose_for_fragments.append(-1)
             print(f"No poses for {frag['name']}")
@@ -927,7 +931,8 @@ class UMA_Dock():
             min_idx = np.argmin(distance)
             best_pose_by_distance.append(min_idx)
             print(f"best pose by distance for {frag['name']} is: {min:.3f} at location: {min_idx}")
-            files.download(f"frag_files/{self.bs_object['name']}_w_{frag['name']}{min_idx}.xyz")
+            if files is not None:
+              files.download(f"frag_files/{self.bs_object['name']}_w_{frag['name']}{min_idx}.xyz")
           else:
             best_pose_by_distance.append(-1)
             print(f"No poses for {frag['name']}")
@@ -1112,7 +1117,7 @@ class UMA_Dock():
     print(f"The lowest elecronic binding energy came from conformer {self.best_conf_idx}, \
     and pose {self.best_pose_idx} = {self.best_energy:.3f} kcal/mol")
 
-    self.best_filename = f'/content/opt_files/{self.bs_object['name']}_w_conf_{self.best_conf_idx}{self.best_pose_idx}_OPTIMIZED.xyz'
+    self.best_filename = f"/content/opt_files/{self.bs_object['name']}_w_conf_{self.best_conf_idx}{self.best_pose_idx}_OPTIMIZED.xyz"
     view_from_file(self.best_filename, self.bs_object, self.frags[self.best_conf_idx])
   
   def run_md_from_xyz(self, temperature_K: float = 300.0, timestep_fs: float = 1.0, steps: int = 1000,

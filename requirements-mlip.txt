@@ -1,0 +1,27 @@
+# The UMA MLIP energy model. REQUIRED to import `UMADock.py` at all -- it does
+# `import torch` and `from fairchem.core import ...` at module top, so even
+# `import UMADock.UMADock` fails without these. (Only `prep_binding_site.py`
+# and the plotting/analysis helpers run on requirements.txt alone.) Install in
+# the same venv after requirements.txt:
+#
+#   pip install -r requirements-mlip.txt
+#
+# UMA is Meta's universal MLIP served through FAIR-Chem. Downloading the weights
+# requires (a) a HuggingFace account, (b) access granted to the Meta FAIR-Chem
+# model repo, and (c) a read-access token. See:
+#   https://github.com/facebookresearch/fairchem
+#
+#   huggingface-cli login        # paste your HF token
+#
+# Then in Python:
+#   from fairchem.core import FAIRChemCalculator, pretrained_mlip
+#   import torch
+#   device = "cuda" if torch.cuda.is_available() else "cpu"
+#   predictor = pretrained_mlip.get_predict_unit("uma-s-1p1", device=device)
+#   # current fairchem-core renamed "uma-s-1" -> "uma-s-1p1" (and "uma-s-1p2").
+#   calculator = FAIRChemCalculator(predictor, task_name="omol")
+#
+# torch CPU wheel is fine for trying the pipeline; a GPU is strongly recommended
+# for real docking (each pose is a single-point + opt energy eval on the cluster).
+torch
+fairchem-core
