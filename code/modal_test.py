@@ -139,7 +139,13 @@ image = (
 @app.function(
     image=image,
     gpu=GPU,
-    timeout=7200,
+    timeout=86400,  # Modal's platform max (24h). The old 7200s (2h) was an
+                    # unvalidated guess carried over from the initial version of
+                    # this file -- never sized against a real production-scale
+                    # run, and a 20-conformer run hit it on 2026-08-15 with no
+                    # result to show for the 2h it did run. Larger runs should
+                    # be launched via ::spawn_main (detached) so a long run
+                    # doesn't tie up a local client either way.
     secrets=[modal.Secret.from_name("huggingface-secret")],
     volumes={
         "/root/.cache/huggingface": hf_cache,

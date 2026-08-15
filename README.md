@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="umadock_banner.png" alt="UMADock — a CafChem project" width="600">
+</p>
+
 # UMA-Dock
 Docking molecules in protein binding sites, scored with a pluggable MLIP energy function (Meta's UMA by default; MACE-OMOL-0 and AIMNet2 also supported — see *Scoring model* below). Also runs with an AI Agent.
 - creates conformations of the input molecule with RDKit
