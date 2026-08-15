@@ -163,6 +163,42 @@ binding energy. (AIMNet2 ran fast on a T4, unlike MACE-OMOL which needed an A100
 Charged residues in the chain-A site (ff14SB, pH 7): LYS106 +1, GLU146 −1, ASP86 −1
 (net −1); His108 and His149 neutral.
 
+### Cross-check against explicit-solvent MD + MM-GBSA: salbutamol / SULT1A3
+As an external sanity check (not part of the repeated validated protocol above), salbutamol
+was docked into the same SULT1A3 chain-A pocket (UMA, T4, 15 conformers × 200 tries) and
+compared against a full-protein, explicit-solvent MD + MM-GBSA calculation of the same
+ligand/target pair (1000-frame trajectory average, GBn2/igb=8), run independently in a
+separate MD pipeline.
+
+| method | ΔG (kcal/mol) | notes |
+|---|---|---|
+| UMADock (UMA) | **−59.73** | best of 15 conformers (electronic binding energy: interaction −75.68, strain +5.64, desolvation +10.31) |
+| MM-GBSA | **−28.38 ± 4.03** | full 2A3R dimer + explicit solvent, 1000-frame ensemble average |
+
+Both favorable (sign agreement), though UMADock's static best-pose estimate runs ~2× more
+favorable in magnitude — expected given the very different theoretical frameworks (a single
+best-pose ML-potential energy vs. a classical-force-field free energy averaged over an
+explicit-solvent MD ensemble), consistent with UMA's tendency toward the most favorable
+numbers among the scorers above.
+
+Heavy-atom ligand RMSD against the MM-GBSA run's docked (t=0) and equilibrated (last-frame)
+poses put UMADock's pose several Å from both (6.9–8.3 Å direct, 1.3–1.5 Å after best-fit
+superposition — so a similar ligand conformation, landing in a different sub-pocket location).
+Visually, though, UMADock's pose sits closer to the pocket center and looks more chemically
+reasonable than the MM-GBSA run's final frame — notable since MM-GBSA had the context of the
+**entire** protein (both monomers) and explicit solvent, while UMADock only ever sees the
+truncated, capped ~275-atom chain-A cluster:
+
+<p align="center">
+  <img src="sal_pose.png" width="45%" alt="Salbutamol docked pose (UMADock, UMA) in the SULT1A3 chain-A pocket">
+  &nbsp;
+  <img src="ud_vs_mm_pose.png" width="45%" alt="UMADock pose vs. the MM-GBSA run's final-frame pose, overlaid in PyMOL">
+</p>
+
+Left: UMADock's best pose. Right: UMADock's pose (this run) overlaid against the MM-GBSA
+trajectory's final frame — both in the same crystallographic coordinate frame (2A3R, no
+recentering), so the offset shown is a real positional difference, not a plotting artifact.
+
 ## CLI_version
 -  See the CLI_version folder for an implementation to be run from the command line.
 -  includes example scripts for running docking and MD.
