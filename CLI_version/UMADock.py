@@ -1134,7 +1134,7 @@ class UMA_Dock():
     
 
       # Initialize velocities consistent with the target temperature
-    MaxwellBoltzmannDistribution(atoms, temperature_K * units.kB)
+    MaxwellBoltzmannDistribution(atoms, temperature_K=temperature_K)
     Stationary(atoms)
     ZeroRotation(atoms)
 
@@ -1151,7 +1151,7 @@ class UMA_Dock():
       # Run dynamics
     dyn.run(steps)
 
-    df = pd.read_table(log_file, sep="\s+")
+    df = pd.read_table(log_file, sep=r"\s+")
     df["Etot/N[eV]"] = pd.to_numeric(df["Etot/N[eV]"], errors='coerce')
     x = df["Etot/N[eV]"].to_list()
     scale_start = sum(x)/len(x)
@@ -1242,7 +1242,7 @@ def run_md_from_any_xyz(calculator, bs_object: dict, temperature_K: float = 300.
 
 
       # Initialize velocities consistent with the target temperature
-    MaxwellBoltzmannDistribution(atoms, temperature_K * units.kB)
+    MaxwellBoltzmannDistribution(atoms, temperature_K=temperature_K)
     Stationary(atoms)
     ZeroRotation(atoms)
 
@@ -1259,7 +1259,7 @@ def run_md_from_any_xyz(calculator, bs_object: dict, temperature_K: float = 300.
       # Run dynamics
     dyn.run(steps)
 
-    df = pd.read_table(log_file, sep="\s+")
+    df = pd.read_table(log_file, sep=r"\s+")
     df["Etot/N[eV]"] = pd.to_numeric(df["Etot/N[eV]"], errors='coerce')
     x = df["Etot/N[eV]"].to_list()
     scale_start = sum(x)/len(x)
