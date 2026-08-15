@@ -192,12 +192,13 @@ truncated, capped ~275-atom chain-A cluster:
 <p align="center">
   <img src="sal_pose.png" width="45%" alt="Salbutamol docked pose (UMADock, UMA) in the SULT1A3 chain-A pocket">
   &nbsp;
-  <img src="ud_vs_mm_pose.png" width="45%" alt="UMADock pose vs. the MM-GBSA run's final-frame pose, overlaid in PyMOL">
+  <img src="ud_vs_mm_pose.png" width="45%" alt="Three-way overlay in PyMOL: the crystallographic LDP ligand (silver), UMADock's pose (blue), and the AutoDock/MM-GBSA pose (green)">
 </p>
 
-Left: UMADock's best pose. Right: UMADock's pose (this run) overlaid against the MM-GBSA
-trajectory's final frame — both in the same crystallographic coordinate frame (2A3R, no
-recentering), so the offset shown is a real positional difference, not a plotting artifact.
+Left: UMADock's best pose. Right: a three-way overlay — the crystallographic **LDP** ligand
+that defines the pocket (silver), **UMADock**'s pose (blue), and the **AutoDock/MM-GBSA**
+pose (green) — all in the same crystallographic coordinate frame (2A3R, no recentering), so
+the offsets shown are real positional differences, not a plotting artifact.
 
 ## CLI_version
 -  See the CLI_version folder for an implementation to be run from the command line.
