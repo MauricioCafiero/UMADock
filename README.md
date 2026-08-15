@@ -22,8 +22,8 @@ Docking molecules in protein binding sites, scored with a pluggable MLIP energy 
 - [Run end-to-end on Modal (`code/modal_test.py`)](#run-end-to-end-on-modal-codemodal_testpy)
   - [Caching & retrieving results (Modal Volumes)](#caching--retrieving-results-modal-volumes)
   - [Scoring model (`--model`)](#scoring-model---model)
-  - [Validated result: paracetamol / SULT1A3](#validated-result-paracetamol--sult1a3)
-  - [Cross-check against explicit-solvent MD + MM-GBSA: salbutamol / SULT1A3](#cross-check-against-explicit-solvent-md--mm-gbsa-salbutamol--sult1a3)
+- [Validated result: paracetamol / SULT1A3](#validated-result-paracetamol--sult1a3)
+- [Cross-check against explicit-solvent MD + MM-GBSA: salbutamol / SULT1A3](#cross-check-against-explicit-solvent-md--mm-gbsa-salbutamol--sult1a3)
 - [CLI_version](#cli_version)
 - [Run from an Agent](#run-from-an-agent)
 - [Set-up](#set-up)
@@ -150,7 +150,7 @@ Model weights are cached in Modal Volumes after the first run so later runs skip
 
 **Sampling:** placement tries the ligand center on a Gaussian whose σ is the binding site's spatial spread and keeps a pose only if it lands within 5 Å of the site center. A large site has a large σ, so the old 10-try default gives ~0 accepted poses — the script default is now 200 tries. The dock phase (single-point UMA evals) is cheap; only the per-pose optimization + desolvation is costly, so scaling `--number-tries` is nearly free — scale it up for larger sites.
 
-### Validated result: paracetamol / SULT1A3
+## Validated result: paracetamol / SULT1A3
 Full runs on a T4 (UMA) and an A100 (MACE-OMOL), each 3 conformers × 200 placement
 tries, completed end-to-end under the Cα constraint convention. The binding site is
 prepared from 2A3R **chain A only** (`--chain A` — 2A3R is a homodimer): **275 atoms,
@@ -184,7 +184,7 @@ binding energy. (AIMNet2 ran fast on a T4, unlike MACE-OMOL which needed an A100
 Charged residues in the chain-A site (ff14SB, pH 7): LYS106 +1, GLU146 −1, ASP86 −1
 (net −1); His108 and His149 neutral.
 
-### Cross-check against explicit-solvent MD + MM-GBSA: salbutamol / SULT1A3
+## Cross-check against explicit-solvent MD + MM-GBSA: salbutamol / SULT1A3
 As an external sanity check (not part of the repeated validated protocol above), salbutamol
 was docked into the same SULT1A3 chain-A pocket (UMA, T4, 15 conformers × 200 tries) and
 compared against a full-protein, explicit-solvent MD + MM-GBSA calculation of the same
