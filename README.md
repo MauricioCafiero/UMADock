@@ -14,6 +14,27 @@ Docking molecules in protein binding sites, scored with a pluggable MLIP energy 
 -  **Modal is the recommended way to run** (see *Run end-to-end on Modal* below); the `notebooks/` Colab examples are the original/legacy interactive path.
 -  The default `uma` scorer needs a HuggingFace token and access to the Meta FAIR-Chem repo; `mace-omol` and `aimnet2` don't need Meta repo access (see *Scoring model*).
 
+## Contents
+- [Project layout](#project-layout)
+- [Prepare a binding site from any PDB (`prep_binding_site.py`)](#prepare-a-binding-site-from-any-pdb-prep_binding_sitepy)
+  - [From the command line](#from-the-command-line)
+  - [From Python](#from-python)
+- [Run end-to-end on Modal (`code/modal_test.py`)](#run-end-to-end-on-modal-codemodal_testpy)
+  - [Caching & retrieving results (Modal Volumes)](#caching--retrieving-results-modal-volumes)
+  - [Scoring model (`--model`)](#scoring-model---model)
+  - [Validated result: paracetamol / SULT1A3](#validated-result-paracetamol--sult1a3)
+  - [Cross-check against explicit-solvent MD + MM-GBSA: salbutamol / SULT1A3](#cross-check-against-explicit-solvent-md--mm-gbsa-salbutamol--sult1a3)
+- [CLI_version](#cli_version)
+- [Run from an Agent](#run-from-an-agent)
+- [Set-up](#set-up)
+  - [Local (venv, Python 3.11)](#local-venv-python-311)
+  - [Colab (legacy)](#colab-legacy)
+- [Run with mostly defaults](#run-with-mostly-defaults)
+- [Sample Output](#sample-output)
+- [Agent output](#agent-output)
+- [Citations](#citations)
+- [To-do list](#to-do-list)
+
 ## Project layout
 ```
 UMADock/
