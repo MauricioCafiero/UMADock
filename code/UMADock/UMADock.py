@@ -1278,3 +1278,58 @@ def view_from_file(filename: str, bs_object, frag):
 
       viewer.zoomTo()
       viewer.show()
+
+def run_md_from_any_xyz(calculator, bs_object: dict, temperature_K: float = 300.0, timestep_fs: float = 1.0, steps: int = 1000,
+    output_traj: str = "md.traj", input_file = "mcr.xyz", total_spin = 1, total_charge = 0,
+    log_file: str = "md.log") -> Atoms:
+  """
+  Read the last frame from an XYZ file and run MD with ASE using VelocityVerlet.
+
+  Unlike UMA_Dock.run_md_from_xyz (which continues from the best docked pose of a
+  finished docking run), this starts from any XYZ file -- e.g. to resume dynamics
+  on a previously-saved pose, or run MD on a structure that didn't come from
+  UMA_Dock.dock() at all.
+
+  Returns None
+  """
+  print(f'Performing MD ====================================================')
+  print(f'Spin: {total_spin}, Charge: {total_charge}')
+  print(f'Steps: {steps}')
+    # Read last frame from XYZ (use index=0 for the first frame, ":" for all frames)
+  atoms = ase.io.read(input_file, format = 'xyz')
+  atoms.info.update({"spin": total_spin, "charge": total_charge})
+
+  c = FixAtoms(indices = bs_object['constraints'])
+  atoms.set_constraint(c)
+  atoms.calc = calculator
+
+    # Initialize velocities consistent with the target temperature
+  MaxwellBoltzmannDistribution(atoms, temperature_K=temperature_K)
+  Stationary(atoms)
+  ZeroRotation(atoms)
+
+    # Use VelocityVerlet integrator
+  dyn = VelocityVerlet(atoms, timestep_fs * units.fs)
+
+    # Logging and trajectory writing
+  logger = MDLogger(dyn, atoms, log_file, header=True, stress=False, peratom=True)
+  dyn.attach(logger, interval=10)
+
+  traj = Trajectory(output_traj, "w", atoms)
+  dyn.attach(traj.write, interval=10)
+
+    # Run dynamics
+  dyn.run(steps)
+
+  df = pd.read_table(log_file, sep=r"\s+")
+  df["Etot/N[eV]"] = pd.to_numeric(df["Etot/N[eV]"], errors='coerce')
+  x = df["Etot/N[eV]"].to_list()
+  scale_start = sum(x)/len(x)
+  x = [val - scale_start for val in x]
+
+  y = df["Time[ps]"].to_list()
+
+  plt.plot(y, x)
+  plt.xlabel("Time (fs)")
+  plt.ylabel("Energy (eV)")
+  plt.show()
