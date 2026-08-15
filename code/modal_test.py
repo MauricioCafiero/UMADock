@@ -39,11 +39,15 @@ Scoring model (--model):
     mace-omol   MACE-OMOL-0 (the MACE analog of UMA's omol task; 89 elements). The
                 MACE variant to try for protein clusters (broader training than
                 MACE-OFF23). Override the checkpoint URL with UMADOCK_MACE_OMOL_URL.
-
-    ('mace-off23' was removed: trained on small organics, its BFGS optimization
-    DIVERGES on a full ~550-atom capped protein binding site in both float32 and
-    float64 regardless of constraints, fmax -> ~1e8 -- out of distribution. Use
-    `uma` or `mace-omol`.)
+    ('mace-off23' is blocked: retested against the corrected single-chain SULT1A3
+    site on 2026-08-15 -- still diverges (fmax -> ~1e8, oscillating) in float64 on
+    A100, the same failure mode as on the original buggy dimer-fused site. Out of
+    distribution for capped protein clusters regardless of site correctness. Use
+    `uma`, `mace-omol`, or `aimnet2`.)
+    aimnet2     AIMNet2 (isayevlab/aimnetcentral), model 'aimnet2-2025' by default
+                (override via UMADOCK_AIMNET2_MODEL). Covers H, B, C, N, O, F, Si,
+                P, S, Cl, As, Se, Br, I; self-validates element coverage. Weights
+                download from Hugging Face on first use.
 
 SAMPLING NOTE: placement tries the ligand center on a Gaussian whose sigma is
 the binding site's spatial spread, and keeps a pose only if the ligand lands
@@ -127,6 +131,7 @@ image = (
     .pip_install("torch")
     .pip_install("fairchem-core")
     .pip_install("mace-torch>=0.3.14")
+    .pip_install("aimnet[ase]")
     # ship the repo modules as an importable package `UMADock` in the container.
     # Source paths resolve relative to this file (code/), so the run is CWD-independent.
     .add_local_file(str(_PKG / "__init__.py"), "/root/UMADock/__init__.py")
@@ -150,14 +155,14 @@ image = (
 def run_test(smiles: str, ligand_resname: str, name: str,
              num_confs: int = 5, number_tries: int = 200,
              criteria: str = "distance", cutoff: float = 4.0, ph: float = 7.0,
-             model: str = "uma", mace_dtype: str = "float64",
+             model: str = "uma", mace_size: str = "medium", mace_dtype: str = "float64",
              pdb_id: str | None = None, pdb_text: str | None = None,
              chain: str | None = None) -> dict:
     """Dock `smiles` into the binding site defined by `ligand_resname` in a PDB.
 
     Provide exactly one of `pdb_id` (fetch from RCSB) or `pdb_text` (raw PDB
     contents, e.g. read from a local file in the entrypoint).
-    `model` selects the scorer: 'uma' (default) | 'mace-omol'.
+    `model` selects the scorer: 'uma' (default) | 'mace-off23' | 'mace-omol' | 'aimnet2'.
     """
     import os
     import json
@@ -232,10 +237,10 @@ def run_test(smiles: str, ligand_resname: str, name: str,
     print(f"[dock] binding site '{name}': {bs['size']} atoms, charge={bs['charge']}, "
           f"spin={bs['spin']}, {len(bs['constraints'])} Cα constraints")
 
-    # 3. calculator (UMA by default; or MACE-OMOL-0)
+    # 3. calculator (UMA by default; or MACE-OFF23 / MACE-OMOL-0)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"[dock] loading scorer '{model}' on {device} (first run downloads weights)")
-    calculator = ud.build_calculator(model, device=device, mace_dtype=mace_dtype)
+    calculator = ud.build_calculator(model, device=device, mace_size=mace_size, mace_dtype=mace_dtype)
 
     # 4. query-ligand conformers
     print(f"[dock] generating {num_confs} conformers for {smiles}")
@@ -321,7 +326,8 @@ def main(smiles: str = "CC(=O)Nc1ccc(O)cc1",   # paracetamol
         pdb_path: str = None,                  # local PDB file (overrides --pdb-id)
         ligand_resname: str = "LDP",           # crystal ligand defining the pocket
         name: str = "SULT1A3",
-        model: str = "uma",                    # uma | mace-omol
+        model: str = "uma",                    # uma | mace-off23 | mace-omol | aimnet2
+        mace_size: str = "medium",             # small|medium|large (mace-off23)
         mace_dtype: str = "float64",           # float64 (precise) | float32 (fast); slow on T4 -- use A100/H100
         num_confs: int = 5, number_tries: int = 200,
         criteria: str = "distance", cutoff: float = 4.0, ph: float = 7.0,
@@ -339,7 +345,7 @@ def main(smiles: str = "CC(=O)Nc1ccc(O)cc1",   # paracetamol
         smiles=smiles, ligand_resname=ligand_resname, name=name,
         num_confs=num_confs, number_tries=number_tries,
         criteria=criteria, cutoff=cutoff, ph=ph,
-        model=model, mace_dtype=mace_dtype,
+        model=model, mace_size=mace_size, mace_dtype=mace_dtype,
         pdb_id=None if pdb_path else pdb_id, pdb_text=pdb_text, chain=chain,
     )
     print("\n===== SUMMARY =====")
@@ -372,7 +378,8 @@ def spawn_main(smiles: str = "CC(=O)Nc1ccc(O)cc1",   # paracetamol
                pdb_path: str = None,                  # local PDB file (overrides --pdb-id)
                ligand_resname: str = "LDP",           # crystal ligand defining the pocket
                name: str = "SULT1A3",
-               model: str = "uma",                    # uma | mace-omol
+               model: str = "uma",                    # uma | mace-off23 | mace-omol | aimnet2
+               mace_size: str = "medium",             # small|medium|large (mace-off23)
                mace_dtype: str = "float64",           # float64 (precise) | float32 (fast)
                num_confs: int = 5, number_tries: int = 200,
                criteria: str = "distance", cutoff: float = 4.0, ph: float = 7.0,
@@ -411,7 +418,7 @@ def spawn_main(smiles: str = "CC(=O)Nc1ccc(O)cc1",   # paracetamol
         smiles=smiles, ligand_resname=ligand_resname, name=name,
         num_confs=num_confs, number_tries=number_tries,
         criteria=criteria, cutoff=cutoff, ph=ph,
-        model=model, mace_dtype=mace_dtype,
+        model=model, mace_size=mace_size, mace_dtype=mace_dtype,
         pdb_id=None if pdb_path else pdb_id, pdb_text=pdb_text, chain=chain,
     )
     print(f"[spawn] SPAWNED call_id={fc.object_id}")

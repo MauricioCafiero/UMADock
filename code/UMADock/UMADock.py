@@ -38,21 +38,22 @@ from rdkit.Chem import AllChem
 # ---------------------------------------------------------------------------
 # Calculator selection: UMA-Dock scores poses with any ASE calculator, so the
 # model choice is made here, not in the docking code. The default is Meta's UMA
-# (FAIRChem, omol task). The MACE alternative is MACE-OMOL-0 (the MACE analog of
-# UMA's omol task, 89 elements). MACE-OFF23 was removed: it diverges on full
-# ~550-atom capped protein binding sites (out of distribution; trained on small
-# organics) -- see build_calculator().
+# (FAIRChem, omol task). MACE alternatives are MACE-OFF23 (organic, ~10 elements)
+# and MACE-OMOL-0 (the MACE analog of UMA's omol task, 89 elements). MACE-OFF23
+# was previously removed after its BFGS optimization diverged on the (buggy)
+# dimer-fused ~550-atom binding site; reinstated to retest against the corrected
+# single-chain ~275-atom site (see DEVLOG.md 2026-08-14 chain fix). AIMNet2
+# (isayevlab/aimnetcentral) is a further organic/elemental-organic alternative,
+# H/B/C/N/O/F/Si/P/S/Cl/As/Se/Br/I; its ASE wrapper reads atoms.info['charge']
+# per-Atoms already, matching this module's existing charge-tagging convention.
 # ---------------------------------------------------------------------------
-def build_calculator(model="uma", device="cpu", mace_dtype="float64"):
+def build_calculator(model="uma", device="cpu", mace_size="medium", mace_dtype="float64"):
     """Build an ASE energy calculator for UMA-Dock scoring.
 
     Args:
-        model: 'uma' (FAIRChem UMA, default) | 'mace-omol'. ('mace-off23' was removed
-            -- it is trained on small organics, so its BFGS optimization DIVERGES on
-            a full ~550-atom capped protein binding site in BOTH float32 and float64
-            regardless of constraints, fmax -> ~1e8; out of distribution. Use 'uma'
-            or 'mace-omol' for protein clusters.)
+        model: 'uma' (FAIRChem UMA, default) | 'mace-off23' | 'mace-omol' | 'aimnet2'.
         device: 'cpu' or 'cuda'.
+        mace_size: 'small' | 'medium' | 'large' (MACE-OFF23 only).
         mace_dtype: 'float64' (default) | 'float32' (faster). Precision/speed tradeoff
             for MACE. float64 is slow on T4/L4 (poor fp64 throughput); use A100/H100.
     Returns:
@@ -65,10 +66,14 @@ def build_calculator(model="uma", device="cpu", mace_dtype="float64"):
         return FAIRChemCalculator(predictor, task_name="omol")
     if key in ("mace_off23", "off23", "mace_off"):
         raise ValueError(
-            "'mace-off23' is no longer supported: it diverges (fmax -> ~1e8) on a "
-            "full ~550-atom capped protein binding site in both float32 and float64 "
-            "regardless of constraints (out of distribution -- trained on small "
-            "organics). Use 'uma' (default) or 'mace-omol' instead."
+            "'mace-off23' is not supported: its BFGS optimization DIVERGES (fmax -> "
+            "~1e8, oscillating) on the SULT1A3 (2A3R) capped protein binding site in "
+            "float64 on A100 -- verified BOTH on the original buggy dimer-fused "
+            "~550-atom site AND, on 2026-08-15, on the corrected single-chain ~275-atom "
+            "site (10 Ca constraints). The divergence is not a site-geometry artifact; "
+            "MACE-OFF23 is out of distribution (trained on small organics) for a capped "
+            "protein cluster regardless of site correctness. Use 'uma' (default), "
+            "'mace-omol', or 'aimnet2' instead."
         )
     if key in ("mace_omol", "omol"):
         from mace.calculators import mace_mp
@@ -77,7 +82,12 @@ def build_calculator(model="uma", device="cpu", mace_dtype="float64"):
             "https://github.com/ACEsuit/mace-foundations/releases/download/mace_omol_0/MACE-omol-0-extra-large-1024.model",
         )
         return mace_mp(model=url, device=device, default_dtype=mace_dtype)
-    raise ValueError(f"unknown model '{model}': use 'uma' | 'mace-omol'")
+    if key in ("aimnet2", "aimnet"):
+        from aimnet.calculators import AIMNet2ASE, AIMNet2Calculator
+        variant = os.environ.get("UMADOCK_AIMNET2_MODEL", "aimnet2-2025")
+        base_calc = AIMNet2Calculator(variant, device=device)
+        return AIMNet2ASE(base_calc)
+    raise ValueError(f"unknown model '{model}': use 'uma' | 'mace-off23' | 'mace-omol' | 'aimnet2'")
 
 
 def mace_supported_symbols(calc):
@@ -87,7 +97,7 @@ def mace_supported_symbols(calc):
 
 
 def check_element_coverage(calc, symbols, model_label="model"):
-    """Raise if a MACE `calc` doesn't cover all `symbols` (general MACE coverage gate)."""
+    """Raise if a MACE `calc` doesn't cover all `symbols` (used for MACE-OFF23)."""
     missing = set(symbols) - mace_supported_symbols(calc)
     if missing:
         raise ValueError(

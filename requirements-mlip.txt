@@ -28,11 +28,18 @@ fairchem-core
 #
 # Optional: a MACE foundation model as an alternative scorer. Only needed if you use
 # ud.build_calculator("mace-omol") instead of the default UMA. (The Modal image in
-# modal_test.py installs this automatically.)
+# modal_test.py installs this automatically.) ('mace-off23' is blocked in
+# build_calculator: its BFGS optimization diverges on capped protein binding sites --
+# verified on both the original buggy site and the corrected single-chain site.)
 #   pip install "mace-torch>=0.3.14"
 #
 #   from mace.calculators import mace_mp
 #   calc = mace_mp(model="<MACE-OMOL-0 release URL>", device="cuda")  # 89 elements
-# ('mace-off23' was removed from build_calculator: it diverges on full ~550-atom
-# capped protein binding sites in both float32 and float64 -- out of distribution.
-# MACE-OMOL-0, the MACE analog of UMA's omol task, is the MACE option to try.)
+#
+# Optional: AIMNet2 (isayevlab/aimnetcentral) as a further alternative scorer. Only
+# needed if you use ud.build_calculator("aimnet2"). (The Modal image installs this
+# automatically.)
+#   pip install "aimnet[ase]"
+#
+#   from aimnet.calculators import AIMNet2ASE, AIMNet2Calculator
+#   calc = AIMNet2ASE(AIMNet2Calculator("aimnet2-2025", device="cuda"))  # 14 elements

@@ -117,10 +117,11 @@ UMA-Dock scores poses with any ASE calculator, so the energy model is pluggable.
 |---|---|---|---|
 | `uma` (default) | Meta's UMA via FAIRChem (omol task) | broad | needs the HF secret + Meta FAIR-Chem repo access. Model id defaults to `uma-s-1p1` (fairchem renamed the bare `uma-s-1`); override with `UMADOCK_UMA_MODEL`. |
 | `mace-omol` | MACE-OMOL-0 — the MACE analog of UMA's omol task | 89 | the MACE variant to try for protein clusters: far broader training than MACE-OFF23 (89 elements, OMOL task), so more likely in-distribution for a ~275-atom single-chain capped site. Larger/slower model; checkpoint URL overridable via `UMADOCK_MACE_OMOL_URL`. |
+| `aimnet2` | AIMNet2 ([isayevlab/aimnetcentral](https://github.com/isayevlab/aimnetcentral)) | 14 (H, B, C, N, O, F, Si, P, S, Cl, As, Se, Br, I) | organic/elemental-organic MLIP; self-validates element coverage. Model variant `aimnet2-2025` by default, override via `UMADOCK_AIMNET2_MODEL`. Weights download from Hugging Face on first use. |
 
-> **`mace-off23` was removed.** MACE-OFF23 is trained on small organic molecules, so its BFGS optimization **diverges on a capped protein binding site regardless of dtype or constraints** (verified on the 2A3R site): float32 on T4 (fmax → ~8e7) and float64 on A100 with the relaxed 20-Cα constraints (fmax → ~2e8) — out of distribution, the model emits exploding forces. Neither dtype nor constraint rigidity is the cause. UMA (broad training incl. biomolecular via the OMOL task) optimizes the same cluster fine (fmax 82 → 2.5, converges). So for this pipeline **use the default `uma`**, or `mace-omol` as the MACE alternative. `build_calculator("mace-off23")` now raises a clear `ValueError` to this effect. The `--mace-dtype` flag (`float64`/`float32`) remains for `mace-omol`.
+> **`mace-off23` is blocked.** MACE-OFF23 is trained on small organic molecules, so its BFGS optimization **diverges on a capped protein binding site** (fmax → ~1e8, oscillating, float64 on A100) — verified twice: on the original buggy dimer-fused ~550-atom 2A3R site, and again on 2026-08-15 against the **corrected single-chain ~275-atom** site (10-Cα constraints) after the dimer-fusion bug fix. Same failure mode both times, so it's not a site-geometry artifact — MACE-OFF23 is out of distribution for capped protein clusters regardless of site correctness. `build_calculator("mace-off23")` raises a clear `ValueError`. Use the default `uma`, or `mace-omol` / `aimnet2` as alternatives.
 
-Model weights (UMA and MACE) are cached in Modal Volumes after the first run so later runs skip the download. MACE needs `mace-torch>=0.3.14` (installed in the Modal image; add it to your local env with `pip install mace-torch` if you use `build_calculator("mace-...")` locally).
+Model weights (UMA, MACE, AIMNet2) are cached in Modal Volumes after the first run so later runs skip the download. MACE needs `mace-torch>=0.3.14`, AIMNet2 needs `aimnet[ase]` (both installed in the Modal image; add them to your local env if you use `build_calculator(...)` locally).
 
 **Sampling:** placement tries the ligand center on a Gaussian whose σ is the binding site's spatial spread and keeps a pose only if it lands within 5 Å of the site center. A large site has a large σ, so the old 10-try default gives ~0 accepted poses — the script default is now 200 tries. The dock phase (single-point UMA evals) is cheap; only the per-pose optimization + desolvation is costly, so scaling `--number-tries` is nearly free — scale it up for larger sites.
 
@@ -135,21 +136,25 @@ during optimization (the ACE/NME caps relax freely).
 |---|---|---|---|
 | UMA (`uma-s-1p1`) | T4 | conf 2 / pose 12 | **−34.94 kcal/mol** |
 | MACE-OMOL-0 (float64) | A100 | conf 2 / pose 15 | **−4.91 kcal/mol** |
+| AIMNet2 (`aimnet2-2025`) | T4 | conf 2 / pose 20 | **−23.74 kcal/mol** |
 
 <p align="center">
-  <img src="uma_para.png" width="45%" alt="UMA best pose: paracetamol in the SULT1A3 chain-A pocket">
+  <img src="uma_para.png" width="30%" alt="UMA best pose: paracetamol in the SULT1A3 chain-A pocket">
   &nbsp;
-  <img src="mace_para.png" width="45%" alt="MACE-OMOL best pose: paracetamol in the SULT1A3 chain-A pocket">
+  <img src="mace_para.png" width="30%" alt="MACE-OMOL best pose: paracetamol in the SULT1A3 chain-A pocket">
+  &nbsp;
+  <img src="aimnet_para.png" width="30%" alt="AIMNet2 best pose: paracetamol in the SULT1A3 chain-A pocket">
 </p>
 
-Optimized best poses for paracetamol in the SULT1A3 (2A3R chain A) pocket — UMA (left, −34.94 kcal/mol) and MACE-OMOL (right, −4.91 kcal/mol).
+Optimized best poses for paracetamol in the SULT1A3 (2A3R chain A) pocket — UMA (left, −34.94 kcal/mol), MACE-OMOL (middle, −4.91 kcal/mol), and AIMNet2 (right, −23.74 kcal/mol).
 
-Both scorers give **negative (favorable)** binding energies for paracetamol in the
+All three scorers give **negative (favorable)** binding energies for paracetamol in the
 single-chain pocket — paracetamol sits in a real pocket and makes favorable contacts.
-The two scorers disagree on magnitude (UMA far more favorable), which is expected for
-different MLIPs on a small-molecule/protein interface; the **sign agreement** is what
-validates the full PDB-forced pipeline: fetch → `prepare_binding_site` (chain A) →
-conformers → dock → optimize → desolvation/strain → binding energy.
+The scorers disagree on magnitude (UMA most favorable, MACE-OMOL least, AIMNet2 in
+between), which is expected for different MLIPs on a small-molecule/protein interface;
+the **sign agreement** is what validates the full PDB-forced pipeline: fetch →
+`prepare_binding_site` (chain A) → conformers → dock → optimize → desolvation/strain →
+binding energy. (AIMNet2 ran fast on a T4, unlike MACE-OMOL which needed an A100.)
 
 Charged residues in the chain-A site (ff14SB, pH 7): LYS106 +1, GLU146 −1, ASP86 −1
 (net −1); His108 and His149 neutral.
