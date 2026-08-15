@@ -7,7 +7,7 @@ from rdkit import Chem
 from rdkit.Chem import AllChem
 from rdkit.Chem import Draw
 
-import CafChem.UMADock as ud
+import UMADock as ud
 
 print('============================================')
 print('UMADock - by Mauricio Cafiero')

@@ -36,14 +36,8 @@ Scoring model (--model):
                 defaults to ``uma-s-1p1`` (current fairchem-core renamed the bare
                 ``uma-s-1`` -> ``uma-s-1p1``/``uma-s-1p2``); override with
                 UMADOCK_UMA_MODEL. Needs the HF secret + Meta FAIR-Chem access.
-    mace-omol   MACE-OMOL-0 (the MACE analog of UMA's omol task; 89 elements). The
-                MACE variant to try for protein clusters (broader training than
-                MACE-OFF23). Override the checkpoint URL with UMADOCK_MACE_OMOL_URL.
-    ('mace-off23' is blocked: retested against the corrected single-chain SULT1A3
-    site on 2026-08-15 -- still diverges (fmax -> ~1e8, oscillating) in float64 on
-    A100, the same failure mode as on the original buggy dimer-fused site. Out of
-    distribution for capped protein clusters regardless of site correctness. Use
-    `uma`, `mace-omol`, or `aimnet2`.)
+    mace-omol   MACE-OMOL-0 (the MACE analog of UMA's omol task; 89 elements).
+                Override the checkpoint URL with UMADOCK_MACE_OMOL_URL.
     aimnet2     AIMNet2 (isayevlab/aimnetcentral), model 'aimnet2-2025' by default
                 (override via UMADOCK_AIMNET2_MODEL). Covers H, B, C, N, O, F, Si,
                 P, S, Cl, As, Se, Br, I; self-validates element coverage. Weights
@@ -97,9 +91,11 @@ GPU = os.environ.get("UMADOCK_GPU", "T4")
 app = modal.App("umadock-dock")
 
 # Cache model weights across runs so we don't re-download every time.
-# UMA (fairchem) -> HF cache; MACE models -> ~/.cache/mace (its default path).
+# UMA (fairchem) -> HF cache; MACE models -> ~/.cache/mace (its default path);
+# AIMNet2 -> ~/.cache/aimnet (its default path).
 hf_cache = modal.Volume.from_name("umadock-hf-cache", create_if_missing=True)
 mace_cache = modal.Volume.from_name("umadock-mace-cache", create_if_missing=True)
+aimnet_cache = modal.Volume.from_name("umadock-aimnet-cache", create_if_missing=True)
 # Reusable cache: raw PDBs (data/pdbs/) + prepared binding sites (data/sites/).
 # Persists across runs so a repeat target skips the RCSB fetch + the PDBFixer
 # repair/select/cap/charge prep (deterministic for a given PDB+resname+cutoff+ph).
@@ -148,6 +144,7 @@ image = (
     volumes={
         "/root/.cache/huggingface": hf_cache,
         "/root/.cache/mace": mace_cache,
+        "/root/.cache/aimnet": aimnet_cache,
         "/root/data": data_cache,
         "/root/output": runs_cache,
     },
@@ -155,14 +152,14 @@ image = (
 def run_test(smiles: str, ligand_resname: str, name: str,
              num_confs: int = 5, number_tries: int = 200,
              criteria: str = "distance", cutoff: float = 4.0, ph: float = 7.0,
-             model: str = "uma", mace_size: str = "medium", mace_dtype: str = "float64",
+             model: str = "uma", mace_dtype: str = "float64",
              pdb_id: str | None = None, pdb_text: str | None = None,
              chain: str | None = None) -> dict:
     """Dock `smiles` into the binding site defined by `ligand_resname` in a PDB.
 
     Provide exactly one of `pdb_id` (fetch from RCSB) or `pdb_text` (raw PDB
     contents, e.g. read from a local file in the entrypoint).
-    `model` selects the scorer: 'uma' (default) | 'mace-off23' | 'mace-omol' | 'aimnet2'.
+    `model` selects the scorer: 'uma' (default) | 'mace-omol' | 'aimnet2'.
     """
     import os
     import json
@@ -237,10 +234,10 @@ def run_test(smiles: str, ligand_resname: str, name: str,
     print(f"[dock] binding site '{name}': {bs['size']} atoms, charge={bs['charge']}, "
           f"spin={bs['spin']}, {len(bs['constraints'])} Cα constraints")
 
-    # 3. calculator (UMA by default; or MACE-OFF23 / MACE-OMOL-0)
+    # 3. calculator (UMA by default; or MACE-OMOL-0 / AIMNet2)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"[dock] loading scorer '{model}' on {device} (first run downloads weights)")
-    calculator = ud.build_calculator(model, device=device, mace_size=mace_size, mace_dtype=mace_dtype)
+    calculator = ud.build_calculator(model, device=device, mace_dtype=mace_dtype)
 
     # 4. query-ligand conformers
     print(f"[dock] generating {num_confs} conformers for {smiles}")
@@ -264,6 +261,7 @@ def run_test(smiles: str, ligand_resname: str, name: str,
         runs_cache.commit()
         hf_cache.commit()
         mace_cache.commit()
+        aimnet_cache.commit()
         return {"ok": False, "smiles": smiles, "name": name, "model": model,
                 "run_dir": run_dir,
                 "opt_ies": list(map(float, opt_ies)), "ebes": list(map(float, ebes))}
@@ -317,6 +315,7 @@ def run_test(smiles: str, ligand_resname: str, name: str,
     runs_cache.commit()
     hf_cache.commit()
     mace_cache.commit()
+    aimnet_cache.commit()
     return result
 
 
@@ -326,8 +325,7 @@ def main(smiles: str = "CC(=O)Nc1ccc(O)cc1",   # paracetamol
         pdb_path: str = None,                  # local PDB file (overrides --pdb-id)
         ligand_resname: str = "LDP",           # crystal ligand defining the pocket
         name: str = "SULT1A3",
-        model: str = "uma",                    # uma | mace-off23 | mace-omol | aimnet2
-        mace_size: str = "medium",             # small|medium|large (mace-off23)
+        model: str = "uma",                    # uma | mace-omol | aimnet2
         mace_dtype: str = "float64",           # float64 (precise) | float32 (fast); slow on T4 -- use A100/H100
         num_confs: int = 5, number_tries: int = 200,
         criteria: str = "distance", cutoff: float = 4.0, ph: float = 7.0,
@@ -345,7 +343,7 @@ def main(smiles: str = "CC(=O)Nc1ccc(O)cc1",   # paracetamol
         smiles=smiles, ligand_resname=ligand_resname, name=name,
         num_confs=num_confs, number_tries=number_tries,
         criteria=criteria, cutoff=cutoff, ph=ph,
-        model=model, mace_size=mace_size, mace_dtype=mace_dtype,
+        model=model, mace_dtype=mace_dtype,
         pdb_id=None if pdb_path else pdb_id, pdb_text=pdb_text, chain=chain,
     )
     print("\n===== SUMMARY =====")
@@ -378,8 +376,7 @@ def spawn_main(smiles: str = "CC(=O)Nc1ccc(O)cc1",   # paracetamol
                pdb_path: str = None,                  # local PDB file (overrides --pdb-id)
                ligand_resname: str = "LDP",           # crystal ligand defining the pocket
                name: str = "SULT1A3",
-               model: str = "uma",                    # uma | mace-off23 | mace-omol | aimnet2
-               mace_size: str = "medium",             # small|medium|large (mace-off23)
+               model: str = "uma",                    # uma | mace-omol | aimnet2
                mace_dtype: str = "float64",           # float64 (precise) | float32 (fast)
                num_confs: int = 5, number_tries: int = 200,
                criteria: str = "distance", cutoff: float = 4.0, ph: float = 7.0,
@@ -418,7 +415,7 @@ def spawn_main(smiles: str = "CC(=O)Nc1ccc(O)cc1",   # paracetamol
         smiles=smiles, ligand_resname=ligand_resname, name=name,
         num_confs=num_confs, number_tries=number_tries,
         criteria=criteria, cutoff=cutoff, ph=ph,
-        model=model, mace_size=mace_size, mace_dtype=mace_dtype,
+        model=model, mace_dtype=mace_dtype,
         pdb_id=None if pdb_path else pdb_id, pdb_text=pdb_text, chain=chain,
     )
     print(f"[spawn] SPAWNED call_id={fc.object_id}")

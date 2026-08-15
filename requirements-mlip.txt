@@ -28,9 +28,7 @@ fairchem-core
 #
 # Optional: a MACE foundation model as an alternative scorer. Only needed if you use
 # ud.build_calculator("mace-omol") instead of the default UMA. (The Modal image in
-# modal_test.py installs this automatically.) ('mace-off23' is blocked in
-# build_calculator: its BFGS optimization diverges on capped protein binding sites --
-# verified on both the original buggy site and the corrected single-chain site.)
+# modal_test.py installs this automatically.)
 #   pip install "mace-torch>=0.3.14"
 #
 #   from mace.calculators import mace_mp

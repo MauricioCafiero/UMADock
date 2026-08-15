@@ -1,14 +1,14 @@
 # UMA-Dock
-Docking molecules in protein binding sites using Meta's UMA MLIP as the energy scoring function. Also runs with an AI Agent.
+Docking molecules in protein binding sites, scored with a pluggable MLIP energy function (Meta's UMA by default; MACE-OMOL-0 and AIMNet2 also supported — see *Scoring model* below). Also runs with an AI Agent.
 - creates conformations of the input molecule with RDKit
 - **Prepares a binding site from any PDB + ligand residue name** (no hand-pruning): finds residues within 4 A of the ligand, caps cut termini with ACE/NME, and assigns ff14SB charges/protonation
 - Docks the conformers into the prepared binding site
--  Evaluates pose energy with UMA
+-  Evaluates pose energy with the selected scoring model (`--model`: `uma` default, `mace-omol`, or `aimnet2`)
 -  Optimizes best pose from each conformer
 -  Calculates an explicit desolvation energy and a ligand strain energy; combines these with the interaction energy for an electronic binding energy.
--  Chooses best overall, and performs rudimentary dynamics to examine stability.
+-  Chooses the best overall pose. `UMA_Dock` also has a `run_md_from_xyz` method for optional rudimentary dynamics on that pose (a manual follow-up step — not run automatically by the Modal pipeline).
 -  **Modal is the recommended way to run** (see *Run end-to-end on Modal* below); the `notebooks/` Colab examples are the original/legacy interactive path.
--  Needs HuggingFace token and access to the Meta repo.
+-  The default `uma` scorer needs a HuggingFace token and access to the Meta FAIR-Chem repo; `mace-omol` and `aimnet2` don't need Meta repo access (see *Scoring model*).
 
 ## Project layout
 ```
@@ -39,14 +39,15 @@ Ligand atoms define the site only; they are not written into the binding-site XY
 
 ### From the command line
 ```sh
-python prep_binding_site.py protein.pdb LIG -c 4 --ph 7 -n MYTARGET -o out/        # monomer
-python prep_binding_site.py 2A3R.pdb LDP -c 4 --ph 7 -n SULT1A3 -o out/ --chain A  # oligomer: pick one chain
+python code/UMADock/prep_binding_site.py protein.pdb LIG -c 4 --ph 7 -n MYTARGET -o out/        # monomer
+python code/UMADock/prep_binding_site.py 2A3R.pdb LDP -c 4 --ph 7 -n SULT1A3 -o out/ --chain A  # oligomer: pick one chain
 # -> out/MYTARGET.xyz  (+ out/MYTARGET_capped.pdb for inspection) and a printed bs_object
 ```
 
 ### From Python
 ```python
-import prep_binding_site as prep
+import sys; sys.path.insert(0, "code")
+from UMADock import prep_binding_site as prep
 # chain= restricts the site to one ligand copy's chain -- needed for oligomers
 # (2A3R is a homodimer; chain="A" keeps the site to one protomer's pocket)
 bs = prep.prepare_binding_site("2A3R.pdb", "LDP", cutoff=4.0, ph=7.0, name="SULT1A3",
@@ -108,6 +109,7 @@ GPU is set by the `UMADOCK_GPU` env var (default T4; A10G ~$1.10, A100 ~$2.10/hr
 ### Caching & retrieving results (Modal Volumes)
 - **`umadock-data-cache`** (`/root/data`): reusable cache — `data/pdbs/<id>.pdb` (raw PDBs, fetched once from RCSB) and `data/sites/<name>.xyz` + `<name>.meta.json` (prepared binding sites, deterministic for a given PDB + resname + cutoff + ph, so a repeat target skips the PDBFixer repair/select/cap/charge prep).
 - **`umadock-runs`** (`/root/output`): per-run `output/<name>_<model>_<UTC>/` with `opt_files/<...>_OPTIMIZED.xyz` (the final bound complex) + `result.json`. These persist so the final pose is **not** lost with the ephemeral container.
+- **`umadock-hf-cache`** (`/root/.cache/huggingface`), **`umadock-mace-cache`** (`/root/.cache/mace`), **`umadock-aimnet-cache`** (`/root/.cache/aimnet`): per-scorer model-weight caches, one per `--model` (UMA/HF, MACE, AIMNet2) so the (multi-GB, for UMA/MACE) weights are only downloaded once.
 - **Retrieving the final pose:** an attached `modal run` writes the best pose + `result.json` into the LOCAL repo `output/` tree. For a `--detach` run that outlives the local client, pull them from the volume instead, e.g. `modal volume get umadock-runs /<name>_<model>_<UTC>/result.json .`. The binding energy is always printed to `modal app logs <app-id>`.
 
 ### Scoring model (`--model`)
@@ -116,12 +118,10 @@ UMA-Dock scores poses with any ASE calculator, so the energy model is pluggable.
 | `--model` | what | elements | notes |
 |---|---|---|---|
 | `uma` (default) | Meta's UMA via FAIRChem (omol task) | broad | needs the HF secret + Meta FAIR-Chem repo access. Model id defaults to `uma-s-1p1` (fairchem renamed the bare `uma-s-1`); override with `UMADOCK_UMA_MODEL`. |
-| `mace-omol` | MACE-OMOL-0 — the MACE analog of UMA's omol task | 89 | the MACE variant to try for protein clusters: far broader training than MACE-OFF23 (89 elements, OMOL task), so more likely in-distribution for a ~275-atom single-chain capped site. Larger/slower model; checkpoint URL overridable via `UMADOCK_MACE_OMOL_URL`. |
+| `mace-omol` | MACE-OMOL-0 — the MACE analog of UMA's omol task | 89 | larger/slower model; checkpoint URL overridable via `UMADOCK_MACE_OMOL_URL`. |
 | `aimnet2` | AIMNet2 ([isayevlab/aimnetcentral](https://github.com/isayevlab/aimnetcentral)) | 14 (H, B, C, N, O, F, Si, P, S, Cl, As, Se, Br, I) | organic/elemental-organic MLIP; self-validates element coverage. Model variant `aimnet2-2025` by default, override via `UMADOCK_AIMNET2_MODEL`. Weights download from Hugging Face on first use. |
 
-> **`mace-off23` is blocked.** MACE-OFF23 is trained on small organic molecules, so its BFGS optimization **diverges on a capped protein binding site** (fmax → ~1e8, oscillating, float64 on A100) — verified twice: on the original buggy dimer-fused ~550-atom 2A3R site, and again on 2026-08-15 against the **corrected single-chain ~275-atom** site (10-Cα constraints) after the dimer-fusion bug fix. Same failure mode both times, so it's not a site-geometry artifact — MACE-OFF23 is out of distribution for capped protein clusters regardless of site correctness. `build_calculator("mace-off23")` raises a clear `ValueError`. Use the default `uma`, or `mace-omol` / `aimnet2` as alternatives.
-
-Model weights (UMA, MACE, AIMNet2) are cached in Modal Volumes after the first run so later runs skip the download. MACE needs `mace-torch>=0.3.14`, AIMNet2 needs `aimnet[ase]` (both installed in the Modal image; add them to your local env if you use `build_calculator(...)` locally).
+Model weights are cached in Modal Volumes after the first run so later runs skip the download. MACE needs `mace-torch>=0.3.14`, AIMNet2 needs `aimnet[ase]` (both installed in the Modal image; add them to your local env if you use `build_calculator(...)` locally).
 
 **Sampling:** placement tries the ligand center on a Gaussian whose σ is the binding site's spatial spread and keeps a pose only if it lands within 5 Å of the site center. A large site has a large σ, so the old 10-try default gives ~0 accepted poses — the script default is now 200 tries. The dock phase (single-point UMA evals) is cheap; only the per-pose optimization + desolvation is costly, so scaling `--number-tries` is nearly free — scale it up for larger sites.
 
@@ -176,6 +176,7 @@ Two tiers of dependencies:
 - **`requirements.txt`** (openmm, pdbfixer, rdkit, ase, py3Dmol, numpy, scipy, pandas, matplotlib) — enough to run **`prep_binding_site.py`** and the plotting/analysis helpers.
 - **`requirements-mlip.txt`** (torch + fairchem-core) — **required to import `UMADock.py` at all** (it imports torch/fairchem at module top), and to actually score poses with UMA. Needs a HuggingFace token + access to Meta's FAIR-Chem repo (see `requirements-mlip.txt`).
 - **optional:** `mace-torch>=0.3.14` — only if you use `build_calculator("mace-omol")` (MACE-OMOL-0) instead of UMA. The Modal image installs it automatically.
+- **optional:** `aimnet[ase]` — only if you use `build_calculator("aimnet2")` (AIMNet2) instead of UMA. The Modal image installs it automatically.
 
 The source lives in `code/`: the importable package is `code/UMADock/` (modules `UMADock.UMADock`, `UMADock.prep_binding_site`), and the runners are `code/modal_test.py` and `code/center.py`.
 
@@ -185,6 +186,7 @@ uv venv --python 3.11 .venv && source .venv/bin/activate
 pip install -r requirements.txt          # core
 pip install -r requirements-mlip.txt     # torch + fairchem-core (HF token needed for the UMA weights)
 pip install "mace-torch>=0.3.14"         # optional: MACE-OMOL-0 scorer
+pip install "aimnet[ase]"                # optional: AIMNet2 scorer
 ```
 The library imports as a package from `code/`: from the repo root, `import sys; sys.path.insert(0, "code")` then `import UMADock.UMADock as ud` / `from UMADock import prep_binding_site as prep` (the Colab-only `google.colab` import is guarded). The `CLI_version/UMADock.py` variant has the Colab bits commented out for a pure-CLI run.
 
@@ -267,6 +269,15 @@ e with the target protein, which can be further investigated for drug discovery 
 oses.
 ```
 
+
+## Citations
+The scoring models UMA-Dock uses (`--model` in `modal_test.py` / `build_calculator()` in `UMADock.py`):
+
+- **UMA** (default) — Wood, B. M.; Dzamba, M.; Fu, X.; Gao, M.; Shuaibi, M.; Barroso-Luque, L.; Abdelmaqsoud, K.; Gharakhanyan, V.; Kitchin, J. R.; Levine, D. S.; Michel, K.; Sriram, A.; Cohen, T.; Das, A.; Rizvi, A.; Sahoo, S. J.; Ulissi, Z. W.; Zitnick, C. L. *UMA: A Family of Universal Models for Atoms.* arXiv:2506.23971 (2025).
+- **MACE-OMOL-0** — architecture + training dataset, two citations:
+  - Batatia, I.; Kovács, D. P.; Simm, G. N. C.; Ortner, C.; Csányi, G. *MACE: Higher Order Equivariant Message Passing Neural Networks for Fast and Accurate Force Fields.* NeurIPS 2022 (*NeurIPS* 35, 11423–11436). arXiv:2206.07697.
+  - Levine, D. S.; Shuaibi, M.; Spotte-Smith, E. W. C.; Taylor, M. G.; Hasyim, M. R.; Michel, K.; Batatia, I.; Csányi, G.; Dzamba, M.; Eastman, P.; Frey, N. C.; Fu, X.; Gharakhanyan, V.; Krishnapriyan, A. S.; Rackers, J. A.; Raja, S.; Rizvi, A.; Rosen, A. S.; Ulissi, Z.; Vargas, S.; Zitnick, C. L.; Blau, S. M.; Wood, B. M. *The Open Molecules 2025 (OMol25) Dataset, Evaluations, and Models.* arXiv:2505.08762 (2025).
+- **AIMNet2** (`aimnet2-2025`) — Anstine, D. M.; Zubatyuk, R.; Isayev, O. *AIMNet2: a neural network potential to meet your neutral, charged, organic, and elemental-organic needs.* *Chem. Sci.* **2025**, *16*, 10228–10244. DOI: [10.1039/D4SC08572H](https://doi.org/10.1039/D4SC08572H). (The `aimnet2-2025` checkpoint itself is a later release on [isayevlab/aimnetcentral](https://github.com/isayevlab/aimnetcentral) without its own dedicated paper.)
 
 ## To-do list
 - Convert all lists/arrays to Numpy or Torch and either compile to C or use GPU
