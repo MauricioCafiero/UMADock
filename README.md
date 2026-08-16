@@ -19,6 +19,7 @@ Docking molecules in protein binding sites, scored with a pluggable MLIP energy 
 - [Prepare a binding site from any PDB (`prep_binding_site.py`)](#prepare-a-binding-site-from-any-pdb-prep_binding_sitepy)
   - [From the command line](#from-the-command-line)
   - [From Python](#from-python)
+  - [Structural metal ions](#structural-metal-ions)
 - [Run end-to-end on Modal (`code/modal_test.py`)](#run-end-to-end-on-modal-codemodal_testpy)
   - [Caching & retrieving results (Modal Volumes)](#caching--retrieving-results-modal-volumes)
   - [Scoring model (`--model`)](#scoring-model---model)
@@ -93,6 +94,23 @@ bs = prep.prepare_binding_site("2A3R.pdb", "LDP", cutoff=4.0, ph=7.0, name="SULT
 
 > Note: UMADock's `get_binding_site_xyz` parser matches a 2-3 digit atom count, so binding sites are currently limited to <1000 atoms. A 4 A single-ligand single-chain site is typically well under that (the SULT1A3 chain-A site is 275 atoms / 10 residues).
 
+### Structural metal ions
+A structural metal ion (`SUPPORTED_METAL_RESNAMES`: ZN/FE/FE2/MG/CA/MN/CU/NI/CO/CD/HG) within the cutoff of the ligand is kept as a bare atom in the cluster — crystal position, formal +2 charge folded into `bs_object["charge"]`, no coordination-restraint bonded model (unlike the sibling `openmm` repo's classical-FF pipeline — the MLIP evaluates the metal–ligand electronics directly). Two knobs:
+
+- `keep_metals` (default `True`) — drop the ion instead with `keep_metals=False` / `--no-keep-metals`.
+- `constrain_metals` (default `False`) — pin the metal at its crystal position (added to `constraints` alongside the per-residue Cα anchors) instead of leaving it free to relax. `--constrain-metals` on the CLI.
+
+> **AIMNet2 does not support metals.** Its element coverage is H/B/C/N/O/F/Si/P/S/Cl/As/Se/Br/I only, so `--model aimnet2` will fail at scoring on any site with a kept structural metal. Use `uma` or `mace-omol` instead.
+
+Validated end-to-end on PDB **1ZNF** (a Cys2His2 zinc finger; apo, so `ligand_resname="ZN"` was used as the site-defining anchor in place of a crystal ligand) with phenol docked as a stand-in ligand, `uma` model, run once unconstrained and once with `--constrain-metals`:
+
+| | unconstrained | constrained |
+|---|---|---|
+| electronic binding energy | −1.151 kcal/mol | −5.077 kcal/mol |
+| Zn final position vs. crystal | drifted ~0.5 Å | pinned exactly |
+
+(Sampling noise, not a benchmark — only 50 placement tries / 2 conformers each, and each run landed on a different best conformer.)
+
 ## Run end-to-end on Modal (`code/modal_test.py`)
 `modal_test.py` is a **general cloud runner**: dock any small molecule (SMILES) into any protein binding site defined by a crystal ligand in a PDB, entirely on a cloud GPU. It builds the binding site on the fly with `prepare_binding_site` (repair + 4 Å residue selection + ACE/NME capping + ff14SB charges), generates ligand conformers, docks with UMA, optimizes the best pose, and computes the electronic binding energy (optimized interaction + desolvation + strain). The hand-cut `CafChem/data/*_QM_site.xyz` structures are not used by this path (they still work for the original DUDE targets).
 
@@ -144,7 +162,7 @@ UMA-Dock scores poses with any ASE calculator, so the energy model is pluggable.
 |---|---|---|---|
 | `uma` (default) | Meta's UMA via FAIRChem (omol task) | broad | needs the HF secret + Meta FAIR-Chem repo access. Model id defaults to `uma-s-1p1` (fairchem renamed the bare `uma-s-1`); override with `UMADOCK_UMA_MODEL`. |
 | `mace-omol` | MACE-OMOL-0 — the MACE analog of UMA's omol task | 89 | larger/slower model; checkpoint URL overridable via `UMADOCK_MACE_OMOL_URL`. |
-| `aimnet2` | AIMNet2 ([isayevlab/aimnetcentral](https://github.com/isayevlab/aimnetcentral)) | 14 (H, B, C, N, O, F, Si, P, S, Cl, As, Se, Br, I) | organic/elemental-organic MLIP; self-validates element coverage. Model variant `aimnet2-2025` by default, override via `UMADOCK_AIMNET2_MODEL`. Weights download from Hugging Face on first use. |
+| `aimnet2` | AIMNet2 ([isayevlab/aimnetcentral](https://github.com/isayevlab/aimnetcentral)) | 14 (H, B, C, N, O, F, Si, P, S, Cl, As, Se, Br, I) | organic/elemental-organic MLIP; self-validates element coverage. **No metals** — fails on any site with a kept [structural metal ion](#structural-metal-ions). Model variant `aimnet2-2025` by default, override via `UMADOCK_AIMNET2_MODEL`. Weights download from Hugging Face on first use. |
 
 Model weights are cached in Modal Volumes after the first run so later runs skip the download. MACE needs `mace-torch>=0.3.14`, AIMNet2 needs `aimnet[ase]` (both installed in the Modal image; add them to your local env if you use `build_calculator(...)` locally).
 

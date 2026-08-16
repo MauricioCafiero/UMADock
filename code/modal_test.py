@@ -160,12 +160,14 @@ def run_test(smiles: str, ligand_resname: str, name: str,
              criteria: str = "distance", cutoff: float = 4.0, ph: float = 7.0,
              model: str = "uma", mace_dtype: str = "float64",
              pdb_id: str | None = None, pdb_text: str | None = None,
-             chain: str | None = None) -> dict:
+             chain: str | None = None, constrain_metals: bool = False) -> dict:
     """Dock `smiles` into the binding site defined by `ligand_resname` in a PDB.
 
     Provide exactly one of `pdb_id` (fetch from RCSB) or `pdb_text` (raw PDB
     contents, e.g. read from a local file in the entrypoint).
     `model` selects the scorer: 'uma' (default) | 'mace-omol' | 'aimnet2'.
+    `constrain_metals` pins any kept structural metal ion at its crystal position
+    (like the per-residue Cα anchors) instead of leaving it free to relax.
     """
     import os
     import json
@@ -220,7 +222,8 @@ def run_test(smiles: str, ligand_resname: str, name: str,
                 and meta.get("ligand_resname") == ligand_resname
                 and meta.get("cutoff") == cutoff
                 and meta.get("ph") == ph
-                and meta.get("chain") == chain):
+                and meta.get("chain") == chain
+                and meta.get("constrain_metals") == constrain_metals):
             print(f"[dock] using cached prepared site '{name}' (data/sites/) "
                   f"chain={meta.get('chain')}")
             bs = {"file_location": site_xyz, "name": name,
@@ -228,13 +231,15 @@ def run_test(smiles: str, ligand_resname: str, name: str,
                   "constraints": meta["constraints"], "size": meta["size"]}
     if bs is None:
         print(f"[dock] preparing binding site '{name}' from {pdb_id or 'supplied PDB'}"
-              f" (chain={chain or 'first ligand copy'})")
+              f" (chain={chain or 'first ligand copy'}, constrain_metals={constrain_metals})")
         bs = prep.prepare_binding_site(
             pdb_path, ligand_resname, cutoff=cutoff, ph=ph,
-            name=name, output_dir="/root/data/sites", chain=chain)
+            name=name, output_dir="/root/data/sites", chain=chain,
+            constrain_metals=constrain_metals)
         with open(site_meta, "w") as f:
             json.dump({"pdb_id": pdb_id, "ligand_resname": ligand_resname,
                        "cutoff": cutoff, "ph": ph, "chain": chain,
+                       "constrain_metals": constrain_metals,
                        "charge": bs["charge"], "spin": bs["spin"],
                        "constraints": bs["constraints"], "size": bs["size"]}, f)
     print(f"[dock] binding site '{name}': {bs['size']} atoms, charge={bs['charge']}, "
@@ -335,7 +340,8 @@ def main(smiles: str = "CC(=O)Nc1ccc(O)cc1",   # paracetamol
         mace_dtype: str = "float64",           # float64 (precise) | float32 (fast); slow on T4 -- use A100/H100
         num_confs: int = 5, number_tries: int = 200,
         criteria: str = "distance", cutoff: float = 4.0, ph: float = 7.0,
-        chain: str = None):                    # ligand copy's chain (None = first copy; set for oligomers)
+        chain: str = None,                     # ligand copy's chain (None = first copy; set for oligomers)
+        constrain_metals: bool = False):       # pin any kept metal ion at its crystal position
     """Dock `smiles` into the binding site of `ligand_resname` in a PDB.
     Defaults reproduce the validated paracetamol / SULT1A3 test. GPU is selected
     by the UMADOCK_GPU env var (default T4); see the module docstring. ``--chain``
@@ -349,7 +355,7 @@ def main(smiles: str = "CC(=O)Nc1ccc(O)cc1",   # paracetamol
         smiles=smiles, ligand_resname=ligand_resname, name=name,
         num_confs=num_confs, number_tries=number_tries,
         criteria=criteria, cutoff=cutoff, ph=ph,
-        model=model, mace_dtype=mace_dtype,
+        model=model, mace_dtype=mace_dtype, constrain_metals=constrain_metals,
         pdb_id=None if pdb_path else pdb_id, pdb_text=pdb_text, chain=chain,
     )
     print("\n===== SUMMARY =====")
@@ -386,7 +392,8 @@ def spawn_main(smiles: str = "CC(=O)Nc1ccc(O)cc1",   # paracetamol
                mace_dtype: str = "float64",           # float64 (precise) | float32 (fast)
                num_confs: int = 5, number_tries: int = 200,
                criteria: str = "distance", cutoff: float = 4.0, ph: float = 7.0,
-               chain: str = None):                    # ligand copy's chain (None = first copy; set for oligomers)
+               chain: str = None,                     # ligand copy's chain (None = first copy; set for oligomers)
+               constrain_metals: bool = False):       # pin any kept metal ion at its crystal position
     """Fire-and-forget: spawn ``run_test`` on Modal's servers and EXIT immediately.
 
     Unlike ``main`` (which calls ``.remote()`` and keeps a local client alive
@@ -421,7 +428,7 @@ def spawn_main(smiles: str = "CC(=O)Nc1ccc(O)cc1",   # paracetamol
         smiles=smiles, ligand_resname=ligand_resname, name=name,
         num_confs=num_confs, number_tries=number_tries,
         criteria=criteria, cutoff=cutoff, ph=ph,
-        model=model, mace_dtype=mace_dtype,
+        model=model, mace_dtype=mace_dtype, constrain_metals=constrain_metals,
         pdb_id=None if pdb_path else pdb_id, pdb_text=pdb_text, chain=chain,
     )
     print(f"[spawn] SPAWNED call_id={fc.object_id}")

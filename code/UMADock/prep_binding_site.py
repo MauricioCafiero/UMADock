@@ -26,6 +26,12 @@ from the sibling ``openmm`` repo:
      constrained optimization, mirroring the hand-built ``*_QM_site.xyz`` sites
      (which pin exactly the Cα of every residue; the ACE/NME caps are left free).
 
+A structural metal ion (``SUPPORTED_METAL_RESNAMES``) within ``cutoff`` of the
+ligand is kept as a bare atom in the cluster (crystal position, formal +2
+charge folded into ``bs_object["charge"]``, unconstrained). Unlike the sibling
+``openmm`` repo's classical-FF pipeline, no coordination bonds/angles are added
+here -- the MLIP evaluates the metal-ligand interaction directly.
+
 Ligand atoms are NOT written into the binding-site XYZ (the ligand is docked
 separately by UMADock); they are only used to define the site.
 """
@@ -51,6 +57,16 @@ PROTEIN_RES = {
 }
 
 WATER_RESNAMES = {"HOH", "WAT", "TIP3", "SOL"}
+
+# Structural metal ions kept as bare atoms in the cluster (element + crystal
+# coords, no bonded model -- unlike openmm_md.build_system's classical-FF
+# coordination restraints, the MLIP evaluates the metal-ligand electronics
+# directly during UMA's constrained optimization, so no harmonic bonds/angles
+# are needed). Formal charge assumed +2 (the common structural oxidation state
+# for all of these in a protein site); pass a different ``charge`` downstream
+# if a specific site is known to differ (e.g. a Cu+ or Fe3+ center).
+SUPPORTED_METAL_RESNAMES = {"ZN", "FE", "FE2", "MG", "CA", "MN", "CU", "NI", "CO", "CD", "HG"}
+METAL_CHARGE = {name: 2 for name in SUPPORTED_METAL_RESNAMES}
 
 # AMBER capping-group atom names (ff14SB templates key on these).
 #   ACE (acetyl, N-terminal cap): CH3-C(=O)-  bonded to the next residue's N
@@ -189,6 +205,28 @@ def _select_residues(topology, pos_ang, ligand_resname, cutoff, chain=None):
         if d.min() <= cutoff:
             selected.append(res)
     return selected, lig_pts, chain
+
+
+def _select_metals(topology, pos_ang, lig_pts, cutoff):
+    """Structural metal ions (``SUPPORTED_METAL_RESNAMES``) with a heavy atom
+    within ``cutoff`` A of a ligand heavy atom.
+
+    Not restricted to the ligand's chain (a HETATM metal's chain id is often
+    assigned independently of the nearby protein chain) -- proximity to the
+    resolved ligand copy is enough.
+    """
+    selected = []
+    for res in topology.residues():
+        if res.name not in SUPPORTED_METAL_RESNAMES:
+            continue
+        pts = [p for a in res.atoms() if (p := _heavy_pos_ang(a, pos_ang)) is not None]
+        if not pts:
+            continue
+        pts = np.array(pts)
+        d = np.linalg.norm(pts[:, None, :] - lig_pts[None, :, :], axis=-1)
+        if d.min() <= cutoff:
+            selected.append(res)
+    return selected
 
 
 # ---------------------------------------------------------------------------
@@ -438,6 +476,8 @@ def prepare_binding_site(
     output_xyz: str | Path | None = None,
     write_pdb: bool = True,
     chain: str | None = None,
+    keep_metals: bool = True,
+    constrain_metals: bool = False,
 ):
     """Build a UMA-Dock binding-site cluster from any PDB + ligand residue name.
 
@@ -463,6 +503,20 @@ def prepare_binding_site(
             without it, the pockets of every ligand copy get fused into one
             nonsense site spanning the whole oligomer. Pass ``chain="A"`` (etc.) to
             pick a specific copy.
+        keep_metals: keep a structural metal ion (``SUPPORTED_METAL_RESNAMES``)
+            within ``cutoff`` of the ligand as a bare atom in the cluster, with
+            its formal ionic charge (assumed +2) folded into the returned
+            ``charge``. Default True. No coordination restraints are added --
+            unlike a classical-FF pipeline, the MLIP evaluates the metal-ligand
+            interaction directly during UMA's constrained optimization.
+        constrain_metals: also add each kept metal ion to ``constraints`` (fixed
+            at its crystal position during UMA's optimization, like the
+            per-residue Cα anchors). Default False -- the metal is left free to
+            relax toward its MLIP-preferred coordination geometry. Set True to
+            pin it exactly at the crystal site instead (e.g. to isolate how much
+            of a pose's energy comes from ligand movement vs. metal drift, or if
+            you don't trust the MLIP's metal geometry enough to let it move). No
+            effect if ``keep_metals=False`` or no metal is within ``cutoff``.
 
     Returns:
         bs_object dict (file_location, name, charge, spin, constraints, size)
@@ -490,6 +544,13 @@ def prepare_binding_site(
           f"ligand {ligand_resname!r} on chain {resolved_chain} "
           f"({len(lig_pts)} ligand heavy atoms)")
 
+    selected_metals = _select_metals(topology, pos_ang, lig_pts, cutoff) if keep_metals else []
+    if selected_metals:
+        names = ", ".join(f"{r.name}/{r.id}" for r in selected_metals)
+        print(f"[prep-site] {len(selected_metals)} structural metal ion(s) within "
+              f"{cutoff} A of the ligand: {names} (kept as bare ion(s), "
+              f"formal charge +2 each)")
+
     # 3. build the capped, hydrogenated cluster (residue H from PDBFixer +
     #    manually placed cap H -- see build_cluster for why addHydrogens can't
     #    do the caps)
@@ -499,9 +560,30 @@ def prepare_binding_site(
     print(f"[prep-site] cluster: {n_res} residues (incl. caps), "
           f"{cluster_top.getNumAtoms()} atoms, {len(cap_idx)} cap atoms")
 
-    # 4. net formal charge from the ff14SB partial-charge sum
+    # 4. net formal charge from the ff14SB partial-charge sum (protein + caps
+    #    only -- ff14SB has no metal templates) plus each kept metal's formal
+    #    ionic charge
     charge, modeller = _net_charge(cluster_top, cluster_pos_nm)
-    print(f"[prep-site] net formal charge at pH {ph}: {charge}")
+    metal_charge = sum(METAL_CHARGE[r.name] for r in selected_metals)
+    charge += metal_charge
+    print(f"[prep-site] net formal charge at pH {ph}: {charge}"
+          + (f" ({charge - metal_charge} protein/caps + {metal_charge} metal)"
+             if selected_metals else ""))
+
+    # 4b. append the kept metal ion(s) as bare atoms at their crystal position
+    if selected_metals:
+        metal_top = app.Topology()
+        metal_chain = metal_top.addChain()
+        metal_pos_nm = []
+        for res in selected_metals:
+            for a in res.atoms():
+                if a.element is None:
+                    continue
+                m_res = metal_top.addResidue(res.name, metal_chain)
+                metal_top.addAtom(a.name, a.element, m_res)
+                p = pos_ang[a.index]
+                metal_pos_nm.append([float(p[0]) / 10.0, float(p[1]) / 10.0, float(p[2]) / 10.0])
+        modeller.add(metal_top, unit.Quantity(np.array(metal_pos_nm), unit.nanometer))
 
     # 5. write the cluster XYZ (element symbols + A coords) and the capped PDB
     final_top = modeller.topology
@@ -518,8 +600,9 @@ def prepare_binding_site(
 
     with open(output_xyz, "w") as f:
         f.write(f"{len(symbols)}\n")
+        metal_note = f" + {len(selected_metals)} metal ion(s)" if selected_metals else ""
         f.write(f"{name} | charge={charge} spin={spin} | "
-                f"{len(selected)} residues + ACE/NME caps, {cutoff} A cutoff\n")
+                f"{len(selected)} residues + ACE/NME caps{metal_note}, {cutoff} A cutoff\n")
         for s, c in zip(symbols, coords):
             f.write(f"{s:<2s} {c[0]: .6f} {c[1]: .6f} {c[2]: .6f}\n")
 
@@ -535,9 +618,17 @@ def prepare_binding_site(
     constraints = [a.index for a in final_top.atoms()
                   if a.name == "CA" and a.residue.name in PROTEIN_RES]
 
+    n_ca_constraints = len(constraints)
+    metal_note = ""
+    if constrain_metals and selected_metals:
+        metal_constraints = [a.index for a in final_top.atoms()
+                             if a.residue.name in SUPPORTED_METAL_RESNAMES]
+        constraints += metal_constraints
+        metal_note = f" + {len(metal_constraints)} metal"
+
     size = final_top.getNumAtoms()
     print(f"[prep-site] wrote {output_xyz} ({size} atoms, "
-          f"{len(constraints)} Cα constraints)")
+          f"{n_ca_constraints} Cα{metal_note} constraints)")
     return {
         "file_location": str(output_xyz),
         "name": name,
@@ -564,12 +655,21 @@ if __name__ == "__main__":
                    help="chain id of the ligand copy to build the site around "
                         "(default: first ligand copy). For oligomers with one ligand "
                         "per monomer, pick one to avoid fusing the pockets.")
+    p.add_argument("--no-keep-metals", action="store_true",
+                   help="drop structural metal ions instead of keeping them as bare "
+                        "atoms in the cluster (default: keep any within --cutoff of "
+                        "the ligand).")
+    p.add_argument("--constrain-metals", action="store_true",
+                   help="pin kept metal ion(s) at their crystal position during UMA's "
+                        "optimization, like the per-residue Cα anchors (default: leave "
+                        "the metal free to relax).")
     args = p.parse_args()
 
     bs = prepare_binding_site(
         args.pdb, args.ligand, cutoff=args.cutoff, ph=args.ph,
         name=args.name, spin=args.spin, output_dir=args.output_dir,
-        chain=args.chain,
+        chain=args.chain, keep_metals=not args.no_keep_metals,
+        constrain_metals=args.constrain_metals,
     )
     print("\nbs_object:")
     for k, v in bs.items():
