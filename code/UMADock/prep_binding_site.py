@@ -155,7 +155,7 @@ def _heavy_pos_ang(atom, pos_ang):
     return np.array([float(p[0]), float(p[1]), float(p[2])])
 
 
-def _select_residues(topology, pos_ang, ligand_resname, cutoff, chain=None):
+def _select_residues(topology, pos_ang, ligand_resname, cutoff, chain=None, fill_gaps=True):
     """Protein residues with a heavy atom within ``cutoff`` A of a ligand heavy atom.
 
     Selection is restricted to ONE ligand copy (one chain) so that an oligomer
@@ -163,6 +163,8 @@ def _select_residues(topology, pos_ang, ligand_resname, cutoff, chain=None):
     ``chain`` selects the chain id of the ligand copy to build around; if None it
     defaults to the chain of the first ligand residue found in the topology.
     Protein residues are taken from that same chain only (a coherent pocket).
+    With ``fill_gaps`` the residue of any one-residue gap between two selected
+    residues is added too (see the comment at the end of the function).
 
     Returns the list of selected Residue objects (OpenMM topology residues), the
     ligand heavy-atom coords (for reporting), and the resolved chain id.
@@ -204,6 +206,22 @@ def _select_residues(topology, pos_ang, ligand_resname, cutoff, chain=None):
         d = np.linalg.norm(pts[:, None, :] - lig_pts[None, :, :], axis=-1)
         if d.min() <= cutoff:
             selected.append(res)
+
+    # fill one-residue gaps: selected residues i and i+2 would be capped as two
+    # fragments, and the NME cap of i and the ACE cap of i+2 both stand in for
+    # residue i+1 -- they land on the same spot (double cap). Taking residue i+1
+    # joins the fragments and removes both caps. Longer gaps cap different
+    # residues, so they need no joining.
+    if fill_gaps:
+        have = {int(r.id): r for r in topology.residues()
+                if r.name in PROTEIN_RES and r.chain.id == chain
+                and r.id.strip().lstrip("-").isdigit()}
+        chosen = sorted(int(r.id) for r in selected if r.id.strip().lstrip("-").isdigit())
+        for a, b in zip(chosen, chosen[1:]):
+            if b - a == 2 and (a + 1) in have:
+                selected.append(have[a + 1])
+                print(f"[prep-site] filled one-residue gap: added "
+                      f"{have[a + 1].name}/{a + 1} between {a} and {b}")
     return selected, lig_pts, chain
 
 
@@ -478,6 +496,7 @@ def prepare_binding_site(
     chain: str | None = None,
     keep_metals: bool = True,
     constrain_metals: bool = False,
+    fill_gaps: bool = True,
 ):
     """Build a UMA-Dock binding-site cluster from any PDB + ligand residue name.
 
@@ -517,6 +536,11 @@ def prepare_binding_site(
             of a pose's energy comes from ligand movement vs. metal drift, or if
             you don't trust the MLIP's metal geometry enough to let it move). No
             effect if ``keep_metals=False`` or no metal is within ``cutoff``.
+        fill_gaps: when two selected residues of the chain are one residue
+            apart (i and i+2), also take residue i+1. Otherwise the two
+            fragments are capped separately and the NME cap of i and the ACE cap
+            of i+2 sit on top of each other where residue i+1 was. Default True;
+            pass False to reproduce the old (pre-2026-10-25) selection.
 
     Returns:
         bs_object dict (file_location, name, charge, spin, constraints, size)
@@ -539,7 +563,7 @@ def prepare_binding_site(
 
     # 2. select residues near the ligand (one chain / one ligand copy)
     selected, lig_pts, resolved_chain = _select_residues(
-        topology, pos_ang, ligand_resname, cutoff, chain=chain)
+        topology, pos_ang, ligand_resname, cutoff, chain=chain, fill_gaps=fill_gaps)
     print(f"[prep-site] {len(selected)} protein residues within {cutoff} A of "
           f"ligand {ligand_resname!r} on chain {resolved_chain} "
           f"({len(lig_pts)} ligand heavy atoms)")
