@@ -20,6 +20,7 @@ Docking molecules in protein binding sites, scored with a pluggable MLIP energy 
   - [From the command line](#from-the-command-line)
   - [From Python](#from-python)
   - [Structural metal ions](#structural-metal-ions)
+  - [Keeping a cofactor in the site (`prep_binding_site_cofactor.py`)](#keeping-a-cofactor-in-the-site-prep_binding_site_cofactorpy)
 - [Run end-to-end on Modal (`code/modal_test.py`)](#run-end-to-end-on-modal-codemodal_testpy)
   - [Caching & retrieving results (Modal Volumes)](#caching--retrieving-results-modal-volumes)
   - [Scoring model (`--model`)](#scoring-model---model)
@@ -110,6 +111,28 @@ Validated end-to-end on PDB **1ZNF** (a Cys2His2 zinc finger; apo, so `ligand_re
 | Zn final position vs. crystal | drifted ~0.5 Å | pinned exactly |
 
 (Sampling noise, not a benchmark — only 50 placement tries / 2 conformers each, and each run landed on a different best conformer.)
+
+### Keeping a cofactor in the site (`prep_binding_site_cofactor.py`)
+
+`prep_binding_site.py` only ever copies two kinds of residue into the cluster: standard amino acids and a bare single-atom structural metal (above). Anything else — including whatever `ligand_resname` you hand it — is used only to locate the pocket and is then dropped. That's fine when the site's defining feature is a crystallographic ligand you mean to replace, or a bare ion. It breaks for a receptor whose active site *is* a multi-atom cofactor that has to stay in the cluster: a heme, an Fe-S cluster, FAD/NAD, or (the case this was written for) coenzyme F430 in methyl-coenzyme M reductase, whose nickel sits as a regular atom embedded inside a 107-atom macrocycle rather than as its own residue. Feeding such a residue to `prep_binding_site.py` anyway doesn't just drop it silently — PDBFixer's `addMissingHydrogens()` tries an RCSB Chemical Component Dictionary lookup for the unrecognized name, which can crash outright (observed directly: a malformed CCD entry for a non-standard residue name raised `ValueError: could not convert string to float: '?'`).
+
+`code/UMADock/prep_binding_site_cofactor.py` adds a `prepare_binding_site_with_cofactor()` that:
+
+- **auto-discovers** any residue that is neither a standard amino acid, water, nor an already-handled bare metal, and keeps it in the cluster verbatim (real coordinates and protonation from the input structure — PDBFixer never sees it, so the CCD-lookup crash above can't happen);
+- takes each kept cofactor's **net formal charge from a caller-supplied map** (`cofactor_charges={"HEM": -2, ...}`, e.g. a RESP partial-charge sum from a real parameterization) rather than deriving it, since there's no general way to get a formal charge for an arbitrary cofactor from bare coordinates — an unlisted one defaults to 0.0 with a loud warning rather than a silent guess;
+- can use the cofactor itself to define the pocket (`ligand_resname=None`, the default — right when the cofactor *is* the site) or a separate crystallographic ligand (`ligand_resname="LDP"`, etc. — when the cofactor is just along for the ride);
+- freezes each kept cofactor at its input coordinates during UMA's pose optimization by default (`constrain_cofactor=True`), since a cofactor's geometry usually comes from a real, already-validated build and an MLIP's short, unconstrained optimization during one pose evaluation isn't the place to rediscover it from scratch.
+
+Validated against methyl-coenzyme M reductase + F430 (`ligand_resname=None`, cofactor = the split `F31`/`NI1` residues from a classical-FF MCPB.py build, net charge −4.0 from their RESP sum): auto-discovery found exactly those two residues, and the resulting site (4.0 Å cutoff, 21 protein residues, 497 atoms total including the 108-atom cofactor, net charge −3) matched a hand-verified reference exactly.
+
+```sh
+python code/UMADock/prep_binding_site_cofactor.py receptor_with_cofactor.pdb \
+       --cofactor-charge F31:-4.282 --cofactor-charge NI1:0.282 \
+       -c 4 --ph 7 -n MYSITE -o out/
+# -> auto-discovers F31 + NI1, keeps both, nets the two charges
+```
+
+> **Small-GPU note.** UMA's force evaluation backprops through a graph on every placement try; on a 4 GB card, larger ligand/site combinations can hit a genuine `torch.OutOfMemoryError` on the very first try (the combined system size exceeding what one forward+backward pass fits in VRAM — not an accumulation bug). `PYTORCH_ALLOC_CONF=expandable_segments:True` (set before `import torch`) delays this for borderline cases but isn't a fix for everything; running the oversized case on `device="cpu"` instead has no VRAM ceiling and wasn't dramatically slower in practice once placement-retry overhead is counted.
 
 ## Run end-to-end on Modal (`code/modal_test.py`)
 `modal_test.py` is a **general cloud runner**: dock any small molecule (SMILES) into any protein binding site defined by a crystal ligand in a PDB, entirely on a cloud GPU. It builds the binding site on the fly with `prepare_binding_site` (repair + 4 Å residue selection + ACE/NME capping + ff14SB charges), generates ligand conformers, docks with UMA, optimizes the best pose, and computes the electronic binding energy (optimized interaction + desolvation + strain). The hand-cut `CafChem/data/*_QM_site.xyz` structures are not used by this path (they still work for the original DUDE targets).
